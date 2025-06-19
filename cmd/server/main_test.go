@@ -49,11 +49,12 @@ func TestServer(t *testing.T) {
 
 	t.Run("Get Gauge Value", func(t *testing.T) {
 		updateURL := fmt.Sprintf("%s/update/gauge/testGauge/123.45", ts.URL)
-		_, err := http.Post(updateURL, "text/plain", bytes.NewBuffer([]byte{}))
+		resp, err := http.Post(updateURL, "text/plain", bytes.NewBuffer([]byte{}))
 		require.NoError(t, err)
+		defer resp.Body.Close()
 
 		getURL := fmt.Sprintf("%s/value/gauge/testGauge", ts.URL)
-		resp, err := http.Get(getURL)
+		resp, err = http.Get(getURL)
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
@@ -62,11 +63,12 @@ func TestServer(t *testing.T) {
 
 	t.Run("Get Counter Value", func(t *testing.T) {
 		updateURL := fmt.Sprintf("%s/update/counter/testCounter/5", ts.URL)
-		_, err := http.Post(updateURL, "text/plain", bytes.NewBuffer([]byte{}))
+		resp, err := http.Post(updateURL, "text/plain", bytes.NewBuffer([]byte{}))
 		require.NoError(t, err)
+		defer resp.Body.Close()
 
 		getURL := fmt.Sprintf("%s/value/counter/testCounter", ts.URL)
-		resp, err := http.Get(getURL)
+		resp, err = http.Get(getURL)
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
