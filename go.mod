@@ -1,4 +1,4 @@
-module github.com/ViktorGlushak/go-metrics
+module github.com/ViktorBystrov72/go-metrics
 
 go 1.24.4
 

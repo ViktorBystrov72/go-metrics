@@ -6,9 +6,10 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 
-	"github.com/ViktorGlushak/go-metrics/internal/storage"
+	"github.com/ViktorBystrov72/go-metrics/internal/storage"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -189,6 +190,10 @@ func main() {
 
 	flag.StringVar(&flagRunAddr, "a", "localhost:8080", "address and port to run server")
 	flag.Parse()
+
+	if envRunAddr := os.Getenv("ADDRESS"); envRunAddr != "" {
+		flagRunAddr = envRunAddr
+	}
 
 	log.Printf("Сервер запущен на %s", flagRunAddr)
 	log.Fatal(http.ListenAndServe(flagRunAddr, r))

@@ -7,7 +7,9 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"os"
 	"runtime"
+	"strconv"
 	"time"
 )
 
@@ -25,6 +27,20 @@ func parseFlags() {
 	flag.IntVar(&r, "r", 10, "report interval in seconds")
 	flag.IntVar(&p, "p", 2, "poll interval in seconds")
 	flag.Parse()
+
+	if envRunAddr := os.Getenv("ADDRESS"); envRunAddr != "" {
+		a = envRunAddr
+	}
+	if envReportInterval := os.Getenv("REPORT_INTERVAL"); envReportInterval != "" {
+		if ri, err := strconv.Atoi(envReportInterval); err == nil {
+			r = ri
+		}
+	}
+	if envPollInterval := os.Getenv("POLL_INTERVAL"); envPollInterval != "" {
+		if pi, err := strconv.Atoi(envPollInterval); err == nil {
+			p = pi
+		}
+	}
 
 	flagRunAddr = fmt.Sprintf("http://%s", a)
 	reportInterval = time.Duration(r) * time.Second
