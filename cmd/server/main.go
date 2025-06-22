@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"html/template"
 	"log"
@@ -184,6 +185,11 @@ func main() {
 	// Главная страница со списком всех метрик
 	r.Get("/", server.indexHandler)
 
-	log.Println("Сервер запущен на порту 8080")
-	log.Fatal(http.ListenAndServe(":8080", r))
+	var flagRunAddr string
+
+	flag.StringVar(&flagRunAddr, "a", "localhost:8080", "address and port to run server")
+	flag.Parse()
+
+	log.Printf("Сервер запущен на %s", flagRunAddr)
+	log.Fatal(http.ListenAndServe(flagRunAddr, r))
 }

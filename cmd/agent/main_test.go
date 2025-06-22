@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -48,9 +47,7 @@ func TestSendMetric(t *testing.T) {
 	}))
 	defer server.Close()
 
-	originalURL := baseURL
-	baseURL = server.URL
-	defer func() { baseURL = originalURL }()
+	flagRunAddr = server.URL
 
 	metric := Metric{
 		Type:  "gauge",
@@ -60,27 +57,4 @@ func TestSendMetric(t *testing.T) {
 
 	err := sendMetric(metric)
 	require.NoError(t, err)
-}
-
-func TestMainLoop(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	originalURL := baseURL
-	baseURL = server.URL
-	defer func() { baseURL = originalURL }()
-
-	done := make(chan bool)
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		done <- true
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("Test timed out")
-	}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
 	"log"
 	"math/rand"
@@ -10,7 +11,25 @@ import (
 	"time"
 )
 
-var baseURL = "http://localhost:8080"
+var (
+	flagRunAddr    string
+	reportInterval time.Duration
+	pollInterval   time.Duration
+)
+
+func parseFlags() {
+	var a string
+	var r, p int
+
+	flag.StringVar(&a, "a", "localhost:8080", "address and port to run server")
+	flag.IntVar(&r, "r", 10, "report interval in seconds")
+	flag.IntVar(&p, "p", 2, "poll interval in seconds")
+	flag.Parse()
+
+	flagRunAddr = fmt.Sprintf("http://%s", a)
+	reportInterval = time.Duration(r) * time.Second
+	pollInterval = time.Duration(p) * time.Second
+}
 
 type Metric struct {
 	Type  string
@@ -72,7 +91,7 @@ func collectMetrics() []Metric {
 
 func sendMetric(metric Metric) error {
 	url := fmt.Sprintf("%s/update/%s/%s/%s",
-		baseURL, metric.Type, metric.Name, metric.Value)
+		flagRunAddr, metric.Type, metric.Name, metric.Value)
 
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer([]byte{}))
 	if err != nil {
@@ -96,25 +115,35 @@ func sendMetric(metric Metric) error {
 }
 
 func main() {
-	pollInterval := 2 * time.Second
+	parseFlags()
+
+	pollTicker := time.NewTicker(pollInterval)
+	reportTicker := time.NewTicker(reportInterval)
+	defer pollTicker.Stop()
+	defer reportTicker.Stop()
+
+	var metrics []Metric
 	var pollCount int64
 
 	for {
-		metrics := collectMetrics()
-		pollCount++
-
-		metrics = append(metrics, Metric{
-			Type:  "counter",
-			Name:  "PollCount",
-			Value: fmt.Sprintf("%d", pollCount),
-		})
-
-		for _, metric := range metrics {
-			if err := sendMetric(metric); err != nil {
-				log.Printf("Error sending metric %s: %v", metric.Name, err)
+		select {
+		case <-pollTicker.C:
+			currentMetrics := collectMetrics()
+			metrics = append(metrics, currentMetrics...)
+			pollCount++
+			metrics = append(metrics, Metric{
+				Type:  "counter",
+				Name:  "PollCount",
+				Value: fmt.Sprintf("%d", pollCount),
+			})
+		case <-reportTicker.C:
+			for _, metric := range metrics {
+				if err := sendMetric(metric); err != nil {
+					log.Printf("Error sending metric %s: %v", metric.Name, err)
+				}
 			}
+			metrics = nil
+			pollCount = 0
 		}
-
-		time.Sleep(pollInterval)
 	}
 }
