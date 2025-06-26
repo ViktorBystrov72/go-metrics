@@ -152,27 +152,29 @@ func main() {
 	defer pollTicker.Stop()
 	defer reportTicker.Stop()
 
-	var metrics []Metric
+	var metricsMap = make(map[string]Metric)
 	var pollCount int64
 
 	for {
 		select {
 		case <-pollTicker.C:
 			currentMetrics := collectMetrics()
-			metrics = append(metrics, currentMetrics...)
+			for _, m := range currentMetrics {
+				metricsMap[m.Name] = m
+			}
 			pollCount++
-			metrics = append(metrics, Metric{
+			metricsMap["PollCount"] = Metric{
 				Type:  "counter",
 				Name:  "PollCount",
 				Value: fmt.Sprintf("%d", pollCount),
-			})
+			}
 		case <-reportTicker.C:
-			for _, metric := range metrics {
+			for _, metric := range metricsMap {
 				if err := sendMetric(metric); err != nil {
 					log.Printf("Error sending metric %s: %v", metric.Name, err)
 				}
 			}
-			metrics = nil
+			metricsMap = make(map[string]Metric)
 			pollCount = 0
 		}
 	}
