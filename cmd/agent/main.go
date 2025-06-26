@@ -131,7 +131,9 @@ func sendMetric(metric Metric) error {
 }
 
 func main() {
-	parseFlags()
+	if err := parseFlags(); err != nil {
+		log.Fatal(err)
+	}
 
 	pollTicker := time.NewTicker(pollInterval)
 	reportTicker := time.NewTicker(reportInterval)
