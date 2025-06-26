@@ -19,7 +19,7 @@ var (
 	pollInterval   time.Duration
 )
 
-func parseFlags() {
+func parseFlags() error {
 	var a string
 	var r, p int
 
