@@ -34,23 +34,23 @@ func parseFlags() error {
 	if envReportInterval := os.Getenv("REPORT_INTERVAL"); envReportInterval != "" {
 		ri, err := strconv.Atoi(envReportInterval)
 		if err != nil || ri <= 0 {
-			return fmt.Errorf("Ошибка конфигурации: некорректное значение REPORT_INTERVAL: %v", envReportInterval)
+			return fmt.Errorf("сonfiguration error: incorrect value REPORT_INTERVAL: %v", envReportInterval)
 		}
 		r = ri
 	}
 	if envPollInterval := os.Getenv("POLL_INTERVAL"); envPollInterval != "" {
 		pi, err := strconv.Atoi(envPollInterval)
 		if err != nil || pi <= 0 {
-			return fmt.Errorf("Ошибка конфигурации: некорректное значение POLL_INTERVAL: %v", envPollInterval)
+			return fmt.Errorf("сonfiguration error: incorrect value POLL_INTERVAL: %v", envPollInterval)
 		}
 		p = pi
 	}
 
 	if r <= 0 {
-		return fmt.Errorf("Ошибка конфигурации: REPORT_INTERVAL должен быть больше 0")
+		return fmt.Errorf("сonfiguration error: REPORT_INTERVAL должен быть больше 0")
 	}
 	if p <= 0 {
-		return fmt.Errorf("Ошибка конфигурации: POLL_INTERVAL должен быть больше 0")
+		return fmt.Errorf("сonfiguration error: POLL_INTERVAL должен быть больше 0")
 	}
 
 	flagRunAddr = fmt.Sprintf("http://%s", a)
