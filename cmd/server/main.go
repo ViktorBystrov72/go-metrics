@@ -9,8 +9,10 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/ViktorBystrov72/go-metrics/internal/logger"
 	"github.com/ViktorBystrov72/go-metrics/internal/storage"
 	"github.com/go-chi/chi/v5"
+	"go.uber.org/zap"
 )
 
 type Server struct {
@@ -195,6 +197,13 @@ func main() {
 		flagRunAddr = envRunAddr
 	}
 
-	log.Printf("Сервер запущен на %s", flagRunAddr)
-	log.Fatal(http.ListenAndServe(flagRunAddr, r))
+	zapLogger, err := zap.NewProduction()
+	if err != nil {
+		log.Fatalf("cannot initialize zap logger: %v", err)
+	}
+	defer zapLogger.Sync()
+
+	loggedRouter := logger.WithLogging(zapLogger, r)
+
+	log.Fatal(http.ListenAndServe(flagRunAddr, loggedRouter))
 }
