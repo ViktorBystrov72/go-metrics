@@ -11,6 +11,7 @@ import (
 	"strconv"
 
 	"github.com/ViktorBystrov72/go-metrics/internal/logger"
+	"github.com/ViktorBystrov72/go-metrics/internal/middleware"
 	"github.com/ViktorBystrov72/go-metrics/internal/models"
 	"github.com/ViktorBystrov72/go-metrics/internal/storage"
 	"github.com/go-chi/chi/v5"
@@ -252,6 +253,8 @@ func main() {
 	server := NewServer(storage)
 
 	r := chi.NewRouter()
+
+	r.Use(middleware.GzipMiddleware)
 
 	// Маршруты для обновления метрик
 	r.Route("/update", func(r chi.Router) {

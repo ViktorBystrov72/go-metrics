@@ -7,6 +7,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"compress/gzip"
+	"io"
+
+	"github.com/ViktorBystrov72/go-metrics/internal/middleware"
 	"github.com/ViktorBystrov72/go-metrics/internal/models"
 	"github.com/ViktorBystrov72/go-metrics/internal/storage"
 	"github.com/go-chi/chi/v5"
@@ -110,5 +114,69 @@ func TestServer_JSON_API(t *testing.T) {
 		require.NoError(t, err)
 		defer resp.Body.Close()
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+}
+
+func TestGzipCompression(t *testing.T) {
+	testStorage := storage.NewMemStorage()
+	server := NewServer(testStorage)
+
+	r := chi.NewRouter()
+	r.Use(middleware.GzipMiddleware)
+	r.Post("/update/", server.updateJSONHandler)
+	r.Post("/value/", server.valueJSONHandler)
+
+	ts := httptest.NewServer(r)
+	defer ts.Close()
+
+	t.Run("accepts_gzip_request", func(t *testing.T) {
+		val := 42.0
+		m := models.Metrics{ID: "gzipGauge", MType: "gauge", Value: &val}
+		body, _ := json.Marshal(m)
+		var buf bytes.Buffer
+		gz := gzip.NewWriter(&buf)
+		_, err := gz.Write(body)
+		require.NoError(t, err)
+		require.NoError(t, gz.Close())
+
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/update/", &buf)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Encoding", "gzip")
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("returns_gzip_response", func(t *testing.T) {
+		val := 99.0
+		m := models.Metrics{ID: "gzipGauge2", MType: "gauge", Value: &val}
+		body, _ := json.Marshal(m)
+		resp, err := http.Post(ts.URL+"/update/", "application/json", bytes.NewBuffer(body))
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		getReq := models.Metrics{ID: "gzipGauge2", MType: "gauge"}
+		getBody, _ := json.Marshal(getReq)
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/value/", bytes.NewBuffer(getBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept-Encoding", "gzip")
+		client := &http.Client{}
+		resp2, err := client.Do(req)
+		require.NoError(t, err)
+		defer resp2.Body.Close()
+		assert.Equal(t, http.StatusOK, resp2.StatusCode)
+		assert.Equal(t, "gzip", resp2.Header.Get("Content-Encoding"))
+		zr, err := gzip.NewReader(resp2.Body)
+		require.NoError(t, err)
+		defer zr.Close()
+		b, err := io.ReadAll(zr)
+		require.NoError(t, err)
+		var got models.Metrics
+		_ = json.Unmarshal(b, &got)
+		assert.NotNil(t, got.Value)
+		assert.Equal(t, val, *got.Value)
 	})
 }

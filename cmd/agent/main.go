@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"time"
 
+	"compress/gzip"
+
 	"github.com/ViktorBystrov72/go-metrics/internal/models"
 )
 
@@ -118,11 +120,24 @@ func sendMetric(metric models.Metrics) error {
 	if err != nil {
 		return fmt.Errorf("marshal error: %w", err)
 	}
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(body))
+
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	_, err = gz.Write(body)
+	if err != nil {
+		return fmt.Errorf("gzip write error: %w", err)
+	}
+	if err := gz.Close(); err != nil {
+		return fmt.Errorf("gzip close error: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, &buf)
 	if err != nil {
 		return fmt.Errorf("error creating request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	req.Header.Set("Accept-Encoding", "gzip")
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
