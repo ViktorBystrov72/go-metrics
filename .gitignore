@@ -26,3 +26,5 @@ vendor/
 
 
 .DS_Store
+.tools
+statictest
