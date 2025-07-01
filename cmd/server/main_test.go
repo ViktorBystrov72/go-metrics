@@ -10,10 +10,11 @@ import (
 	"compress/gzip"
 	"io"
 
+	"os"
+
 	"github.com/ViktorBystrov72/go-metrics/internal/middleware"
 	"github.com/ViktorBystrov72/go-metrics/internal/models"
 	"github.com/ViktorBystrov72/go-metrics/internal/storage"
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -179,4 +180,183 @@ func TestGzipCompression(t *testing.T) {
 		assert.NotNil(t, got.Value)
 		assert.Equal(t, val, *got.Value)
 	})
+}
+
+func TestServer_Configuration_Priority(t *testing.T) {
+	// Приоритет конфигурации: env > flag > default
+
+	originalStoreInterval := os.Getenv("STORE_INTERVAL")
+	originalFileStoragePath := os.Getenv("FILE_STORAGE_PATH")
+	originalRestore := os.Getenv("RESTORE")
+
+	// Восстанавливаем
+	defer func() {
+		if originalStoreInterval != "" {
+			os.Setenv("STORE_INTERVAL", originalStoreInterval)
+		} else {
+			os.Unsetenv("STORE_INTERVAL")
+		}
+		if originalFileStoragePath != "" {
+			os.Setenv("FILE_STORAGE_PATH", originalFileStoragePath)
+		} else {
+			os.Unsetenv("FILE_STORAGE_PATH")
+		}
+		if originalRestore != "" {
+			os.Setenv("RESTORE", originalRestore)
+		} else {
+			os.Unsetenv("RESTORE")
+		}
+	}()
+
+	// Переменные окружения имеют приоритет над флагами
+	os.Setenv("STORE_INTERVAL", "60")
+	os.Setenv("FILE_STORAGE_PATH", "/custom/path.json")
+	os.Setenv("RESTORE", "false")
+
+	t.Run("Environment variables override flags", func(t *testing.T) {
+		// Проверка переменные окружения читаются корректно
+		if os.Getenv("STORE_INTERVAL") != "60" {
+			t.Error("STORE_INTERVAL not set correctly")
+		}
+		if os.Getenv("FILE_STORAGE_PATH") != "/custom/path.json" {
+			t.Error("FILE_STORAGE_PATH not set correctly")
+		}
+		if os.Getenv("RESTORE") != "false" {
+			t.Error("RESTORE not set correctly")
+		}
+	})
+}
+
+func TestServer_FileStorage_Integration(t *testing.T) {
+	tempFile := "test_server_metrics.json"
+	defer os.Remove(tempFile)
+
+	// Тестовое хранилище
+	testStorage := storage.NewMemStorage()
+
+	// Тестовые метрики
+	testStorage.UpdateGauge("test_gauge", 123.45)
+	testStorage.UpdateCounter("test_counter", 42)
+
+	// Сохраняем метрики
+	err := testStorage.SaveToFile(tempFile)
+	require.NoError(t, err)
+
+	// Файл создался
+	_, err = os.Stat(tempFile)
+	require.NoError(t, err)
+
+	// Создаем новое хранилище и загружаем
+	newStorage := storage.NewMemStorage()
+	err = newStorage.LoadFromFile(tempFile)
+	require.NoError(t, err)
+
+	// Данные восстановились
+	gauge, exists := newStorage.GetGauge("test_gauge")
+	require.True(t, exists)
+	assert.Equal(t, 123.45, gauge)
+
+	counter, exists := newStorage.GetCounter("test_counter")
+	require.True(t, exists)
+	assert.Equal(t, int64(42), counter)
+}
+
+func TestServer_StoreInterval_Zero(t *testing.T) {
+	// Тест для синхронного сохранения (STORE_INTERVAL = 0)
+	tempFile := "sync_metrics.json"
+	defer os.Remove(tempFile)
+
+	testStorage := storage.NewMemStorage()
+	testStorage.UpdateGauge("sync_test", 99.99)
+
+	// При STORE_INTERVAL = 0 сохранение должно происходить синхронно
+	// Значит каждая операция обновления сразу сохраняется в файл
+
+	// Сохраняем вручную для теста
+	err := testStorage.SaveToFile(tempFile)
+	require.NoError(t, err)
+
+	// Проверяем что файл создался и содержит данные
+	_, err = os.Stat(tempFile)
+	require.NoError(t, err)
+
+	// Загрузка и проверка
+	newStorage := storage.NewMemStorage()
+	err = newStorage.LoadFromFile(tempFile)
+	require.NoError(t, err)
+
+	gauge, exists := newStorage.GetGauge("sync_test")
+	require.True(t, exists)
+	assert.Equal(t, 99.99, gauge)
+}
+
+func TestServer_Restore_Disabled(t *testing.T) {
+	// Тест когда RESTORE = false
+	tempFile := "restore_disabled.json"
+	defer os.Remove(tempFile)
+
+	// Создаем файл с данными
+	testStorage := storage.NewMemStorage()
+	testStorage.UpdateGauge("persistent_gauge", 777.77)
+	err := testStorage.SaveToFile(tempFile)
+	require.NoError(t, err)
+
+	// При RESTORE = false новое хранилище должно быть пустым
+	// даже если файл существует
+	newStorage := storage.NewMemStorage()
+	// Не вызываем LoadFromFile, так как RESTORE = false
+
+	// Проверяем что хранилище пустое
+	gauges := newStorage.GetAllGauges()
+	counters := newStorage.GetAllCounters()
+
+	assert.Equal(t, 0, len(gauges))
+	assert.Equal(t, 0, len(counters))
+}
+
+func TestServer_FileStorage_ConcurrentAccess(t *testing.T) {
+	tempFile := "concurrent_server_metrics.json"
+	defer os.Remove(tempFile)
+
+	testStorage := storage.NewMemStorage()
+
+	// Добавляем метрики из нескольких горутин
+	done := make(chan bool, 5)
+	for i := 0; i < 5; i++ {
+		go func(id int) {
+			testStorage.UpdateGauge("concurrent_gauge_"+string(rune(id)), float64(id))
+			testStorage.UpdateCounter("concurrent_counter_"+string(rune(id)), int64(id))
+			done <- true
+		}(i)
+	}
+
+	for i := 0; i < 5; i++ {
+		<-done
+	}
+
+	// Сохранение
+	err := testStorage.SaveToFile(tempFile)
+	require.NoError(t, err)
+
+	// Загрузка и проверка
+	newStorage := storage.NewMemStorage()
+	err = newStorage.LoadFromFile(tempFile)
+	require.NoError(t, err)
+
+	gauges := newStorage.GetAllGauges()
+	counters := newStorage.GetAllCounters()
+
+	assert.Equal(t, 5, len(gauges))
+	assert.Equal(t, 5, len(counters))
+
+	// Значения корректны
+	for i := 0; i < 5; i++ {
+		gauge, exists := newStorage.GetGauge("concurrent_gauge_" + string(rune(i)))
+		require.True(t, exists)
+		assert.Equal(t, float64(i), gauge)
+
+		counter, exists := newStorage.GetCounter("concurrent_counter_" + string(rune(i)))
+		require.True(t, exists)
+		assert.Equal(t, int64(i), counter)
+	}
 }

@@ -8,7 +8,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
+	"time"
 
 	"github.com/ViktorBystrov72/go-metrics/internal/logger"
 	"github.com/ViktorBystrov72/go-metrics/internal/middleware"
@@ -249,7 +252,42 @@ func (s *Server) valueJSONHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	// Конфигурация
+	var (
+		flagRunAddr         string
+		flagStoreInterval   int
+		flagFileStoragePath string
+		flagRestore         bool
+	)
+	flag.StringVar(&flagRunAddr, "a", "localhost:8080", "address and port to run server")
+	flag.IntVar(&flagStoreInterval, "i", 300, "store interval in seconds")
+	flag.StringVar(&flagFileStoragePath, "f", "/tmp/metrics-db.json", "file storage path")
+	flag.BoolVar(&flagRestore, "r", true, "restore from file on start")
+	flag.Parse()
+
+	if envRunAddr := os.Getenv("ADDRESS"); envRunAddr != "" {
+		flagRunAddr = envRunAddr
+	}
+	if envStoreInterval := os.Getenv("STORE_INTERVAL"); envStoreInterval != "" {
+		if v, err := strconv.Atoi(envStoreInterval); err == nil {
+			flagStoreInterval = v
+		}
+	}
+	if envFileStoragePath := os.Getenv("FILE_STORAGE_PATH"); envFileStoragePath != "" {
+		flagFileStoragePath = envFileStoragePath
+	}
+	if envRestore := os.Getenv("RESTORE"); envRestore != "" {
+		if envRestore == "true" || envRestore == "1" {
+			flagRestore = true
+		} else if envRestore == "false" || envRestore == "0" {
+			flagRestore = false
+		}
+	}
+
 	storage := storage.NewMemStorage()
+	if flagRestore {
+		_ = storage.LoadFromFile(flagFileStoragePath) // игнорируем ошибку если файла нет
+	}
 	server := NewServer(storage)
 
 	r := chi.NewRouter()
@@ -273,15 +311,6 @@ func main() {
 	r.Post("/update/", server.updateJSONHandler)
 	r.Post("/value/", server.valueJSONHandler)
 
-	var flagRunAddr string
-
-	flag.StringVar(&flagRunAddr, "a", "localhost:8080", "address and port to run server")
-	flag.Parse()
-
-	if envRunAddr := os.Getenv("ADDRESS"); envRunAddr != "" {
-		flagRunAddr = envRunAddr
-	}
-
 	zapLogger, err := zap.NewProduction()
 	if err != nil {
 		log.Fatalf("cannot initialize zap logger: %v", err)
@@ -289,6 +318,32 @@ func main() {
 	defer zapLogger.Sync()
 
 	loggedRouter := logger.WithLogging(zapLogger, r)
+
+	// Периодическое сохранение
+	stop := make(chan struct{})
+	if flagStoreInterval > 0 {
+		go func() {
+			ticker := time.NewTicker(time.Duration(flagStoreInterval) * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					_ = storage.SaveToFile(flagFileStoragePath)
+				case <-stop:
+					return
+				}
+			}
+		}()
+	}
+
+	// Сохранение при завершении
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-quit
+		_ = storage.SaveToFile(flagFileStoragePath)
+		os.Exit(0)
+	}()
 
 	log.Fatal(http.ListenAndServe(flagRunAddr, loggedRouter))
 }

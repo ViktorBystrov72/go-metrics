@@ -1,6 +1,10 @@
 package storage
 
-import "sync"
+import (
+	"encoding/json"
+	"os"
+	"sync"
+)
 
 // MemStorage реализация хранилища в памяти
 type MemStorage struct {
@@ -69,4 +73,43 @@ func (s *MemStorage) GetAllCounters() map[string]int64 {
 		result[k] = v
 	}
 	return result
+}
+
+type storageDump struct {
+	Gauges   map[string]float64 `json:"gauges"`
+	Counters map[string]int64   `json:"counters"`
+}
+
+func (s *MemStorage) SaveToFile(filename string) error {
+	s.mu.RLock()
+	dump := storageDump{
+		Gauges:   s.gauges,
+		Counters: s.counters,
+	}
+	s.mu.RUnlock()
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	enc := json.NewEncoder(file)
+	return enc.Encode(dump)
+}
+
+func (s *MemStorage) LoadFromFile(filename string) error {
+	file, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	var dump storageDump
+	dec := json.NewDecoder(file)
+	if err := dec.Decode(&dump); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.gauges = dump.Gauges
+	s.counters = dump.Counters
+	s.mu.Unlock()
+	return nil
 }
