@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/ViktorBystrov72/go-metrics/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -14,7 +15,7 @@ func TestCollectMetrics(t *testing.T) {
 
 	metricNames := make(map[string]bool)
 	for _, m := range metrics {
-		metricNames[m.Name] = true
+		metricNames[m.ID] = true
 	}
 
 	requiredMetrics := []string{
@@ -31,28 +32,25 @@ func TestCollectMetrics(t *testing.T) {
 	}
 
 	for _, m := range metrics {
-		if m.Name == "RandomValue" {
-			assert.Equal(t, "gauge", m.Type)
-		} else {
-			assert.Equal(t, "gauge", m.Type)
-		}
+		assert.Equal(t, "gauge", m.MType)
 	}
 }
 
 func TestSendMetric(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
-		assert.Equal(t, "text/plain", r.Header.Get("Content-Type"))
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
 
 	flagRunAddr = server.URL
 
-	metric := Metric{
-		Type:  "gauge",
-		Name:  "testMetric",
-		Value: "123.45",
+	val := 123.45
+	metric := models.Metrics{
+		ID:    "testMetric",
+		MType: "gauge",
+		Value: &val,
 	}
 
 	err := sendMetric(metric)
