@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"html/template"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 
 	"github.com/ViktorBystrov72/go-metrics/internal/logger"
+	"github.com/ViktorBystrov72/go-metrics/internal/models"
 	"github.com/ViktorBystrov72/go-metrics/internal/storage"
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
@@ -169,6 +171,82 @@ func (s *Server) indexHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) updateJSONHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost || r.Header.Get("Content-Type") != "application/json" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	var m models.Metrics
+	if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	var resp models.Metrics
+	resp.ID = m.ID
+	resp.MType = m.MType
+	switch m.MType {
+	case "gauge":
+		if m.Value == nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		s.storage.UpdateGauge(m.ID, *m.Value)
+		v, _ := s.storage.GetGauge(m.ID)
+		resp.Value = &v
+	case "counter":
+		if m.Delta == nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		s.storage.UpdateCounter(m.ID, *m.Delta)
+		v, _ := s.storage.GetCounter(m.ID)
+		resp.Delta = &v
+	default:
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) valueJSONHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost || r.Header.Get("Content-Type") != "application/json" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	var m models.Metrics
+	if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	var resp models.Metrics
+	resp.ID = m.ID
+	resp.MType = m.MType
+	switch m.MType {
+	case "gauge":
+		v, ok := s.storage.GetGauge(m.ID)
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		resp.Value = &v
+	case "counter":
+		v, ok := s.storage.GetCounter(m.ID)
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		resp.Delta = &v
+	default:
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 func main() {
 	storage := storage.NewMemStorage()
 	server := NewServer(storage)
@@ -187,6 +265,10 @@ func main() {
 
 	// Главная страница со списком всех метрик
 	r.Get("/", server.indexHandler)
+
+	// JSON API
+	r.Post("/update/", server.updateJSONHandler)
+	r.Post("/value/", server.valueJSONHandler)
 
 	var flagRunAddr string
 
