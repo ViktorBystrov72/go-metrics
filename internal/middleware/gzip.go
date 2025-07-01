@@ -32,18 +32,8 @@ func GzipMiddleware(next http.Handler) http.Handler {
 			defer gz.Close()
 		}
 
-		// Компрессия ответа
-		acceptsGzip := strings.Contains(r.Header.Get("Accept-Encoding"), "gzip")
-		shouldCompress := false
-		ct := w.Header().Get("Content-Type")
-		if ct == "" {
-			ct = r.Header.Get("Content-Type")
-		}
-		if acceptsGzip && (strings.Contains(ct, "application/json") || strings.Contains(ct, "text/html")) {
-			shouldCompress = true
-		}
-
-		if shouldCompress {
+		// Компрессия ответа (всегда, если клиент поддерживает gzip)
+		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 			gz := gzip.NewWriter(w)
 			defer gz.Close()
 			w.Header().Set("Content-Encoding", "gzip")
