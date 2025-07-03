@@ -19,4 +19,10 @@ type Storage interface {
 
 	// GetAllCounters возвращает все counter метрики
 	GetAllCounters() map[string]int64
+
+	// SaveToFile сохраняет метрики в файл
+	SaveToFile(filename string) error
+
+	// LoadFromFile загружает метрики из файла
+	LoadFromFile(filename string) error
 }

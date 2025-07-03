@@ -8,6 +8,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
 	"runtime"
 	"strconv"
@@ -115,7 +116,10 @@ func collectMetrics() []models.Metrics {
 }
 
 func sendMetric(metric models.Metrics) error {
-	url := fmt.Sprintf("%s/update/", flagRunAddr)
+	url, err := url.JoinPath(flagRunAddr, "update")
+	if err != nil {
+		return fmt.Errorf("error joining URL: %w", err)
+	}
 	body, err := json.Marshal(metric)
 	if err != nil {
 		return fmt.Errorf("marshal error: %w", err)
