@@ -116,7 +116,7 @@ func collectMetrics() []models.Metrics {
 }
 
 func sendMetric(metric models.Metrics) error {
-	url, err := url.JoinPath(flagRunAddr, "update")
+	url, err := url.JoinPath(flagRunAddr, "update/")
 	if err != nil {
 		return fmt.Errorf("error joining URL: %w", err)
 	}
