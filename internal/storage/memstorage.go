@@ -140,3 +140,8 @@ func (s *MemStorage) Ping() error {
 	// Для хранилища в памяти всегда возвращаем nil
 	return nil
 }
+
+// IsDatabase возвращает false, так как это не база данных
+func (s *MemStorage) IsDatabase() bool {
+	return false
+}

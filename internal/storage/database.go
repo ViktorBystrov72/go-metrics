@@ -48,6 +48,7 @@ func createTables(db *sql.DB) error {
 		UNIQUE(name, type)
 	);
 	CREATE INDEX IF NOT EXISTS idx_metrics_name_type ON metrics(name, type);
+	CREATE INDEX IF NOT EXISTS idx_metrics_created_at ON metrics(created_at);
 	`
 
 	_, err := db.Exec(query)
@@ -180,4 +181,9 @@ func (d *DatabaseStorage) SaveToFile(filename string) error {
 func (d *DatabaseStorage) LoadFromFile(filename string) error {
 	// Для базы данных загрузка из файла не требуется
 	return nil
+}
+
+// IsDatabase возвращает true, так как это база данных
+func (d *DatabaseStorage) IsDatabase() bool {
+	return true
 }

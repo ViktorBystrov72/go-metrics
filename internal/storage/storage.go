@@ -28,4 +28,7 @@ type Storage interface {
 
 	// Ping проверяет соединение с хранилищем (для БД)
 	Ping() error
+
+	// IsDatabase возвращает true, если это база данных
+	IsDatabase() bool
 }

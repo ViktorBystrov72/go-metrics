@@ -18,7 +18,6 @@ import (
 	"github.com/ViktorBystrov72/go-metrics/internal/models"
 	"github.com/ViktorBystrov72/go-metrics/internal/server"
 	"github.com/ViktorBystrov72/go-metrics/internal/storage"
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -402,5 +401,17 @@ func TestServer_DatabaseDSN_Configuration(t *testing.T) {
 		cfg, err := config.Load()
 		require.NoError(t, err)
 		assert.Equal(t, "postgres://env:env@localhost:5432/env", cfg.DatabaseDSN)
+	})
+}
+
+func TestStorage_IsDatabase(t *testing.T) {
+	t.Run("database_storage", func(t *testing.T) {
+		storage := &storage.DatabaseStorage{}
+		assert.True(t, storage.IsDatabase())
+	})
+
+	t.Run("memory_storage", func(t *testing.T) {
+		storage := storage.NewMemStorage()
+		assert.False(t, storage.IsDatabase())
 	})
 }

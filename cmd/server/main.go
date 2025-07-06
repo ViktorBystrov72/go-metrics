@@ -18,17 +18,36 @@ func main() {
 
 	var storageInstance storage.Storage
 
-	// Если указан DSN для базы данных, используем PostgreSQL
+	// Приоритет хранилищ: PostgreSQL -> файл -> память
 	if cfg.DatabaseDSN != "" {
 		dbStorage, err := storage.NewDatabaseStorage(cfg.DatabaseDSN)
 		if err != nil {
-			log.Fatalf("Failed to connect to database: %v", err)
+			log.Printf("Failed to connect to database: %v, falling back to file storage", err)
+		} else {
+			defer dbStorage.Close()
+			storageInstance = dbStorage
+			log.Printf("Using PostgreSQL storage")
 		}
-		defer dbStorage.Close()
-		storageInstance = dbStorage
-	} else {
-		// Иначе используем хранилище в памяти
+	}
+
+	// Если PostgreSQL недоступен, используем файловое хранилище
+	if storageInstance == nil && cfg.FileStoragePath != "" {
+		fileStorage := storage.NewMemStorage()
+		if cfg.Restore {
+			if err := fileStorage.LoadFromFile(cfg.FileStoragePath); err != nil {
+				log.Printf("Failed to load from file: %v", err)
+			} else {
+				log.Printf("Loaded metrics from file: %s", cfg.FileStoragePath)
+			}
+		}
+		storageInstance = fileStorage
+		log.Printf("Using file storage: %s", cfg.FileStoragePath)
+	}
+
+	// Если ни PostgreSQL, ни файл недоступны, используем память
+	if storageInstance == nil {
 		storageInstance = storage.NewMemStorage()
+		log.Printf("Using in-memory storage")
 	}
 
 	storageConfig := &server.Config{
