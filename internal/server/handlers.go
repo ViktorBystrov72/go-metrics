@@ -255,3 +255,12 @@ func (h *Handlers) ValueJSONHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Ошибка при кодировании JSON ответа в ValueJSONHandler: %v", err)
 	}
 }
+
+// PingHandler обрабатывает GET запросы для проверки соединения с базой данных
+func (h *Handlers) PingHandler(w http.ResponseWriter, r *http.Request) {
+	if err := h.storage.Ping(); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}

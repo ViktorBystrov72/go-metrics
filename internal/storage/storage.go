@@ -25,4 +25,7 @@ type Storage interface {
 
 	// LoadFromFile загружает метрики из файла
 	LoadFromFile(filename string) error
+
+	// Ping проверяет соединение с хранилищем (для БД)
+	Ping() error
 }

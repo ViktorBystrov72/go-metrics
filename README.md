@@ -1,32 +1,141 @@
-# go-musthave-metrics-tpl
+# Go Metrics Service
 
-Шаблон репозитория для трека «Сервер сбора метрик и алертинга».
+Сервис для сбора и хранения метрик с поддержкой PostgreSQL.
 
-## Начало работы
+## Возможности
 
-1. Склонируйте репозиторий в любую подходящую директорию на вашем компьютере.
-2. В корне репозитория выполните команду `go mod init <name>` (где `<name>` — адрес вашего репозитория на GitHub без префикса `https://`) для создания модуля.
+- Сбор метрик runtime (gauge и counter)
+- HTTP API для получения и обновления метрик
+- Поддержка сжатия gzip
+- Сохранение метрик в файл или PostgreSQL
+- Проверка соединения с базой данных через `/ping`
 
-## Обновление шаблона
+## Запуск
 
-Чтобы иметь возможность получать обновления автотестов и других частей шаблона, выполните команду:
+### Без базы данных (хранилище в памяти)
 
-```
-git remote add -m main template https://github.com/Yandex-Practicum/go-musthave-metrics-tpl.git
-```
-
-Для обновления кода автотестов выполните команду:
-
-```
-git fetch template && git checkout template/main .github
+```bash
+./cmd/server/server
 ```
 
-Затем добавьте полученные изменения в свой репозиторий.
+### С PostgreSQL
 
-## Запуск автотестов
+```bash
+# Через флаг командной строки
+./cmd/server/server -d "postgres://username:password@localhost:5432/dbname?sslmode=disable"
 
-Для успешного запуска автотестов называйте ветки `iter<number>`, где `<number>` — порядковый номер инкремента. Например, в ветке с названием `iter4` запустятся автотесты для инкрементов с первого по четвёртый.
+# Через переменную окружения
+export DATABASE_DSN="postgres://username:password@localhost:5432/dbname?sslmode=disable"
+./cmd/server/server
+```
 
-При мёрже ветки с инкрементом в основную ветку `main` будут запускаться все автотесты.
+### Параметры конфигурации
 
-Подробнее про локальный и автоматический запуск читайте в [README автотестов](https://github.com/Yandex-Practicum/go-autotests).
+- `-a` - адрес и порт сервера (по умолчанию: localhost:8080)
+- `-d` - строка подключения к PostgreSQL
+- `-f` - путь к файлу для сохранения метрик (по умолчанию: /tmp/metrics-db.json)
+- `-i` - интервал сохранения в секундах (по умолчанию: 300)
+- `-r` - восстановление метрик при запуске (по умолчанию: true)
+
+### Переменные окружения
+
+- `ADDRESS` - адрес и порт сервера
+- `DATABASE_DSN` - строка подключения к PostgreSQL
+- `FILE_STORAGE_PATH` - путь к файлу для сохранения метрик
+- `STORE_INTERVAL` - интервал сохранения в секундах
+- `RESTORE` - восстановление метрик при запуске
+
+## API
+
+### Проверка соединения с БД
+
+```http
+GET /ping
+```
+
+**Ответ:**
+- `200 OK` - соединение с БД установлено
+- `500 Internal Server Error` - ошибка соединения с БД
+
+### Обновление метрик
+
+```http
+POST /update/{type}/{name}/{value}
+```
+
+**Примеры:**
+```bash
+curl -X POST "http://localhost:8080/update/gauge/Alloc/123.45"
+curl -X POST "http://localhost:8080/update/counter/PollCount/1"
+```
+
+### Получение метрик
+
+```http
+GET /value/{type}/{name}
+```
+
+**Примеры:**
+```bash
+curl "http://localhost:8080/value/gauge/Alloc"
+curl "http://localhost:8080/value/counter/PollCount"
+```
+
+### JSON API
+
+```http
+POST /update/
+Content-Type: application/json
+
+{
+  "id": "Alloc",
+  "type": "gauge",
+  "value": 123.45
+}
+```
+
+```http
+POST /value/
+Content-Type: application/json
+
+{
+  "id": "Alloc",
+  "type": "gauge"
+}
+```
+
+## База данных
+
+При использовании PostgreSQL автоматически создается таблица `metrics` со следующей структурой:
+
+```sql
+CREATE TABLE metrics (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    type VARCHAR(50) NOT NULL,
+    value DOUBLE PRECISION,
+    delta BIGINT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(name, type)
+);
+```
+
+## Сборка
+
+```bash
+# Сборка сервера
+cd cmd/server && go build -o server
+
+# Сборка агента
+cd cmd/agent && go build -o agent
+```
+
+## Тестирование
+
+```bash
+# Запуск тестов
+go test ./...
+
+# Запуск автотестов
+metricstest -test.v -test.run=^TestIteration10$ -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=.
+```

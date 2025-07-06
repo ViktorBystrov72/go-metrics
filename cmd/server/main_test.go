@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,11 +13,11 @@ import (
 
 	"os"
 
+	"github.com/ViktorBystrov72/go-metrics/internal/config"
 	"github.com/ViktorBystrov72/go-metrics/internal/middleware"
 	"github.com/ViktorBystrov72/go-metrics/internal/models"
 	"github.com/ViktorBystrov72/go-metrics/internal/server"
 	"github.com/ViktorBystrov72/go-metrics/internal/storage"
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -191,7 +192,6 @@ func TestServer_Configuration_Priority(t *testing.T) {
 	originalFileStoragePath := os.Getenv("FILE_STORAGE_PATH")
 	originalRestore := os.Getenv("RESTORE")
 
-	// Восстанавливаем
 	defer func() {
 		if originalStoreInterval != "" {
 			os.Setenv("STORE_INTERVAL", originalStoreInterval)
@@ -216,7 +216,6 @@ func TestServer_Configuration_Priority(t *testing.T) {
 	os.Setenv("RESTORE", "false")
 
 	t.Run("Environment variables override flags", func(t *testing.T) {
-		// Проверка переменные окружения читаются корректно
 		if os.Getenv("STORE_INTERVAL") != "60" {
 			t.Error("STORE_INTERVAL not set correctly")
 		}
@@ -347,4 +346,60 @@ func TestServer_FileStorage_ConcurrentAccess(t *testing.T) {
 		require.True(t, exists)
 		assert.Equal(t, int64(i), counter)
 	}
+}
+
+func TestServer_PingHandler(t *testing.T) {
+	testStorage := storage.NewMemStorage()
+	handlers := server.NewHandlers(testStorage)
+
+	r := chi.NewRouter()
+	r.Get("/ping", handlers.PingHandler)
+
+	ts := httptest.NewServer(r)
+	defer ts.Close()
+
+	t.Run("ping_success", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/ping")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+}
+
+func TestServer_DatabaseDSN_Configuration(t *testing.T) {
+	t.Run("database_dsn_flag", func(t *testing.T) {
+		// Сбрасываем флаги перед тестом
+		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+
+		// Тест проверяет, что флаг -d корректно обрабатывается
+		// Это интеграционный тест, который проверяет парсинг конфигурации
+		oldArgs := os.Args
+		defer func() { os.Args = oldArgs }()
+
+		os.Args = []string{"server", "-d", "postgres://test:test@localhost:5432/test"}
+
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.Equal(t, "postgres://test:test@localhost:5432/test", cfg.DatabaseDSN)
+	})
+
+	t.Run("database_dsn_env", func(t *testing.T) {
+		// Сбрасываем флаги перед тестом
+		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+
+		// Тест проверяет, что переменная окружения DATABASE_DSN имеет приоритет
+		oldEnv := os.Getenv("DATABASE_DSN")
+		defer os.Setenv("DATABASE_DSN", oldEnv)
+
+		os.Setenv("DATABASE_DSN", "postgres://env:env@localhost:5432/env")
+
+		oldArgs := os.Args
+		defer func() { os.Args = oldArgs }()
+
+		os.Args = []string{"server", "-d", "postgres://flag:flag@localhost:5432/flag"}
+
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.Equal(t, "postgres://env:env@localhost:5432/env", cfg.DatabaseDSN)
+	})
 }

@@ -16,17 +16,30 @@ func main() {
 		log.Fatal(err)
 	}
 
-	storage := storage.NewMemStorage()
+	var storageInstance storage.Storage
+
+	// Если указан DSN для базы данных, используем PostgreSQL
+	if cfg.DatabaseDSN != "" {
+		dbStorage, err := storage.NewDatabaseStorage(cfg.DatabaseDSN)
+		if err != nil {
+			log.Fatalf("Failed to connect to database: %v", err)
+		}
+		defer dbStorage.Close()
+		storageInstance = dbStorage
+	} else {
+		// Иначе используем хранилище в памяти
+		storageInstance = storage.NewMemStorage()
+	}
 
 	storageConfig := &server.Config{
 		StoreInterval:   cfg.StoreInterval,
 		FileStoragePath: cfg.FileStoragePath,
 		Restore:         cfg.Restore,
 	}
-	storageManager := server.NewStorageManager(storage, storageConfig)
+	storageManager := server.NewStorageManager(storageInstance, storageConfig)
 	storageManager.Start()
 
-	router := server.NewRouter(storage)
+	router := server.NewRouter(storageInstance)
 
 	zapLogger, err := zap.NewProduction()
 	if err != nil {

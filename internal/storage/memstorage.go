@@ -134,3 +134,9 @@ func (s *MemStorage) LoadFromFile(filename string) error {
 	s.mu.Unlock()
 	return nil
 }
+
+// Ping проверяет соединение с хранилищем (для совместимости с интерфейсом)
+func (s *MemStorage) Ping() error {
+	// Для хранилища в памяти всегда возвращаем nil
+	return nil
+}

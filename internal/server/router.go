@@ -37,6 +37,9 @@ func NewRouter(storage storage.Storage) *Router {
 	// Главная страница со списком всех метрик
 	router.Get("/", handlers.IndexHandler)
 
+	// Проверка соединения с базой данных
+	router.Get("/ping", handlers.PingHandler)
+
 	// JSON API
 	router.Post("/update/", handlers.UpdateJSONHandler)
 	router.Post("/value/", handlers.ValueJSONHandler)
