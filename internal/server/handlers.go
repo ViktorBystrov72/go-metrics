@@ -258,6 +258,11 @@ func (h *Handlers) ValueJSONHandler(w http.ResponseWriter, r *http.Request) {
 
 // PingHandler обрабатывает GET запросы для проверки соединения с базой данных
 func (h *Handlers) PingHandler(w http.ResponseWriter, r *http.Request) {
+	log.Printf("PingHandler: storage type: %T, IsAvailable: %v", h.storage, h.storage.IsAvailable())
+	if !h.storage.IsAvailable() {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 	if err := h.storage.Ping(); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return

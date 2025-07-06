@@ -145,3 +145,8 @@ func (s *MemStorage) Ping() error {
 func (s *MemStorage) IsDatabase() bool {
 	return false
 }
+
+// IsAvailable всегда true для памяти
+func (s *MemStorage) IsAvailable() bool {
+	return true
+}

@@ -187,3 +187,25 @@ func (d *DatabaseStorage) LoadFromFile(filename string) error {
 func (d *DatabaseStorage) IsDatabase() bool {
 	return true
 }
+
+// IsAvailable возвращает true, если соединение с БД установлено
+func (d *DatabaseStorage) IsAvailable() bool {
+	return d.db != nil
+}
+
+// BrokenStorage реализует Storage, всегда возвращает ошибку
+// Используется, если DSN задан, но подключение к БД не удалось
+
+type BrokenStorage struct{}
+
+func (b *BrokenStorage) UpdateGauge(name string, value float64) {}
+func (b *BrokenStorage) UpdateCounter(name string, value int64) {}
+func (b *BrokenStorage) GetGauge(name string) (float64, bool)   { return 0, false }
+func (b *BrokenStorage) GetCounter(name string) (int64, bool)   { return 0, false }
+func (b *BrokenStorage) GetAllGauges() map[string]float64       { return map[string]float64{} }
+func (b *BrokenStorage) GetAllCounters() map[string]int64       { return map[string]int64{} }
+func (b *BrokenStorage) SaveToFile(filename string) error       { return fmt.Errorf("storage unavailable") }
+func (b *BrokenStorage) LoadFromFile(filename string) error     { return fmt.Errorf("storage unavailable") }
+func (b *BrokenStorage) Ping() error                            { return fmt.Errorf("storage unavailable") }
+func (b *BrokenStorage) IsDatabase() bool                       { return true }
+func (b *BrokenStorage) IsAvailable() bool                      { return false }

@@ -7,18 +7,21 @@
 - Сбор метрик runtime (gauge и counter)
 - HTTP API для получения и обновления метрик
 - Поддержка сжатия gzip
-- Сохранение метрик в файл или PostgreSQL
+- **PostgreSQL как основное хранилище метрик**
+- Автоматический fallback: PostgreSQL → файл → память
 - Проверка соединения с базой данных через `/ping`
+
+## Логика выбора хранилища
+
+Сервер автоматически выбирает хранилище в следующем порядке приоритета:
+
+1. **PostgreSQL** - если указан `DATABASE_DSN` и подключение успешно
+2. **Файловое хранилище** - если PostgreSQL недоступен, но указан путь к файлу
+3. **Хранилище в памяти** - если ни PostgreSQL, ни файл недоступны
 
 ## Запуск
 
-### Без базы данных (хранилище в памяти)
-
-```bash
-./cmd/server/server
-```
-
-### С PostgreSQL
+### С PostgreSQL (рекомендуется)
 
 ```bash
 # Через флаг командной строки
@@ -29,12 +32,27 @@ export DATABASE_DSN="postgres://username:password@localhost:5432/dbname?sslmode=
 ./cmd/server/server
 ```
 
+### С файловым хранилищем (fallback)
+
+```bash
+# Сервер автоматически переключится на файловое хранилище
+# если PostgreSQL недоступен
+./cmd/server/server -f /path/to/metrics.json
+```
+
+### Только в памяти (fallback)
+
+```bash
+# Сервер использует память, если ни PostgreSQL, ни файл недоступны
+./cmd/server/server
+```
+
 ### Параметры конфигурации
 
 - `-a` - адрес и порт сервера (по умолчанию: localhost:8080)
 - `-d` - строка подключения к PostgreSQL
 - `-f` - путь к файлу для сохранения метрик (по умолчанию: /tmp/metrics-db.json)
-- `-i` - интервал сохранения в секундах (по умолчанию: 300)
+- `-i` - интервал сохранения в секунды (по умолчанию: 300)
 - `-r` - восстановление метрик при запуске (по умолчанию: true)
 
 ### Переменные окружения
@@ -118,7 +136,15 @@ CREATE TABLE metrics (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(name, type)
 );
+CREATE INDEX idx_metrics_name_type ON metrics(name, type);
+CREATE INDEX idx_metrics_created_at ON metrics(created_at);
 ```
+
+**Особенности PostgreSQL хранилища:**
+- Метрики сохраняются сразу при обновлении (без периодического сохранения)
+- Используется `DOUBLE PRECISION` для gauge метрик
+- Автоматическое создание индексов для оптимизации запросов
+- Поддержка уникальных ограничений для предотвращения дублирования
 
 ## Сборка
 
@@ -136,6 +162,7 @@ cd cmd/agent && go build -o agent
 # Запуск тестов
 go test ./...
 
-# Запуск автотестов
-metricstest -test.v -test.run=^TestIteration10$ -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=.
+metricstest -test.v -test.run=^TestIteration7$ -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=.
+
+metricstest -test.v -test.run=^TestIteration11$ -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=. -database-dsn="postgres://user:pass@localhost:5432/dbname?sslmode=disable"
 ```

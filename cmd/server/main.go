@@ -22,16 +22,14 @@ func main() {
 	if cfg.DatabaseDSN != "" {
 		dbStorage, err := storage.NewDatabaseStorage(cfg.DatabaseDSN)
 		if err != nil {
-			log.Printf("Failed to connect to database: %v, falling back to file storage", err)
+			log.Printf("Failed to connect to database: %v, database unavailable", err)
+			storageInstance = &storage.BrokenStorage{}
 		} else {
 			defer dbStorage.Close()
 			storageInstance = dbStorage
 			log.Printf("Using PostgreSQL storage")
 		}
-	}
-
-	// Если PostgreSQL недоступен, используем файловое хранилище
-	if storageInstance == nil && cfg.FileStoragePath != "" {
+	} else if cfg.FileStoragePath != "" {
 		fileStorage := storage.NewMemStorage()
 		if cfg.Restore {
 			if err := fileStorage.LoadFromFile(cfg.FileStoragePath); err != nil {
@@ -42,10 +40,7 @@ func main() {
 		}
 		storageInstance = fileStorage
 		log.Printf("Using file storage: %s", cfg.FileStoragePath)
-	}
-
-	// Если ни PostgreSQL, ни файл недоступны, используем память
-	if storageInstance == nil {
+	} else {
 		storageInstance = storage.NewMemStorage()
 		log.Printf("Using in-memory storage")
 	}

@@ -31,4 +31,7 @@ type Storage interface {
 
 	// IsDatabase возвращает true, если это база данных
 	IsDatabase() bool
+
+	// IsAvailable возвращает true, если хранилище доступно
+	IsAvailable() bool
 }
