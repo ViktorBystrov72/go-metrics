@@ -2,15 +2,21 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
 	"runtime"
 	"strconv"
 	"time"
+
+	"compress/gzip"
+
+	"github.com/ViktorBystrov72/go-metrics/internal/models"
 )
 
 var (
@@ -59,17 +65,10 @@ func parseFlags() error {
 	return nil
 }
 
-type Metric struct {
-	Type  string
-	Name  string
-	Value string
-}
-
-func collectMetrics() []Metric {
-	var metrics []Metric
+func collectMetrics() []models.Metrics {
+	var metrics []models.Metrics
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-
 	gaugeMetrics := map[string]float64{
 		"Alloc":         float64(m.Alloc),
 		"BuckHashSys":   float64(m.BuckHashSys),
@@ -99,46 +98,59 @@ func collectMetrics() []Metric {
 		"Sys":           float64(m.Sys),
 		"TotalAlloc":    float64(m.TotalAlloc),
 	}
-
 	for name, value := range gaugeMetrics {
-		metrics = append(metrics, Metric{
-			Type:  "gauge",
-			Name:  name,
-			Value: fmt.Sprintf("%g", value),
+		v := value
+		metrics = append(metrics, models.Metrics{
+			ID:    name,
+			MType: "gauge",
+			Value: &v,
 		})
 	}
-
-	metrics = append(metrics, Metric{
-		Type:  "gauge",
-		Name:  "RandomValue",
-		Value: fmt.Sprintf("%g", rand.Float64()),
+	rv := rand.Float64()
+	metrics = append(metrics, models.Metrics{
+		ID:    "RandomValue",
+		MType: "gauge",
+		Value: &rv,
 	})
-
 	return metrics
 }
 
-func sendMetric(metric Metric) error {
-	url := fmt.Sprintf("%s/update/%s/%s/%s",
-		flagRunAddr, metric.Type, metric.Name, metric.Value)
+func sendMetric(metric models.Metrics) error {
+	url, err := url.JoinPath(flagRunAddr, "update/")
+	if err != nil {
+		return fmt.Errorf("error joining URL: %w", err)
+	}
+	body, err := json.Marshal(metric)
+	if err != nil {
+		return fmt.Errorf("marshal error: %w", err)
+	}
 
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer([]byte{}))
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	_, err = gz.Write(body)
+	if err != nil {
+		return fmt.Errorf("gzip write error: %w", err)
+	}
+	if err := gz.Close(); err != nil {
+		return fmt.Errorf("gzip close error: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, &buf)
 	if err != nil {
 		return fmt.Errorf("error creating request: %w", err)
 	}
-
-	req.Header.Set("Content-Type", "text/plain")
-
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	req.Header.Set("Accept-Encoding", "gzip")
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("error sending request: %w", err)
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
-
 	return nil
 }
 
@@ -146,35 +158,33 @@ func main() {
 	if err := parseFlags(); err != nil {
 		log.Fatal(err)
 	}
-
 	pollTicker := time.NewTicker(pollInterval)
 	reportTicker := time.NewTicker(reportInterval)
 	defer pollTicker.Stop()
 	defer reportTicker.Stop()
-
-	var metricsMap = make(map[string]Metric)
+	var metricsMap = make(map[string]models.Metrics)
 	var pollCount int64
-
 	for {
 		select {
 		case <-pollTicker.C:
 			currentMetrics := collectMetrics()
 			for _, m := range currentMetrics {
-				metricsMap[m.Name] = m
+				metricsMap[m.ID] = m
 			}
 			pollCount++
-			metricsMap["PollCount"] = Metric{
-				Type:  "counter",
-				Name:  "PollCount",
-				Value: fmt.Sprintf("%d", pollCount),
+			pc := pollCount
+			metricsMap["PollCount"] = models.Metrics{
+				ID:    "PollCount",
+				MType: "counter",
+				Delta: &pc,
 			}
 		case <-reportTicker.C:
 			for _, metric := range metricsMap {
 				if err := sendMetric(metric); err != nil {
-					log.Printf("Error sending metric %s: %v", metric.Name, err)
+					log.Printf("Error sending metric %s: %v", metric.ID, err)
 				}
 			}
-			metricsMap = make(map[string]Metric)
+			metricsMap = make(map[string]models.Metrics)
 			pollCount = 0
 		}
 	}
