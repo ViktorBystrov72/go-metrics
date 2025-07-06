@@ -76,9 +76,7 @@ func (d *DatabaseStorage) UpdateGauge(name string, value float64) {
 	WHERE metrics.name = $1 AND metrics.type = 'gauge'
 	`
 
-	_, err := d.db.Exec(query, name, value)
-	if err != nil {
-	}
+	_, _ = d.db.Exec(query, name, value)
 }
 
 // UpdateCounter обновляет counter метрику в базе данных
@@ -91,9 +89,7 @@ func (d *DatabaseStorage) UpdateCounter(name string, value int64) {
 	WHERE metrics.name = $1 AND metrics.type = 'counter'
 	`
 
-	_, err := d.db.Exec(query, name, value)
-	if err != nil {
-	}
+	_, _ = d.db.Exec(query, name, value)
 }
 
 // GetGauge получает gauge метрику из базы данных
@@ -141,6 +137,10 @@ func (d *DatabaseStorage) GetAllGauges() map[string]float64 {
 		}
 	}
 
+	if err := rows.Err(); err != nil {
+		return make(map[string]float64)
+	}
+
 	return gauges
 }
 
@@ -161,6 +161,10 @@ func (d *DatabaseStorage) GetAllCounters() map[string]int64 {
 		if err := rows.Scan(&name, &value); err == nil {
 			counters[name] = value
 		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return make(map[string]int64)
 	}
 
 	return counters
