@@ -10,7 +10,6 @@ import (
 
 	"github.com/ViktorBystrov72/go-metrics/internal/models"
 	"github.com/ViktorBystrov72/go-metrics/internal/storage"
-	"github.com/go-chi/chi/v5"
 )
 
 // Handlers содержит HTTP обработчики
@@ -258,7 +257,6 @@ func (h *Handlers) ValueJSONHandler(w http.ResponseWriter, r *http.Request) {
 
 // PingHandler обрабатывает GET запросы для проверки соединения с базой данных
 func (h *Handlers) PingHandler(w http.ResponseWriter, r *http.Request) {
-	log.Printf("PingHandler: storage type: %T, IsAvailable: %v", h.storage, h.storage.IsAvailable())
 	if !h.storage.IsAvailable() {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
@@ -267,5 +265,33 @@ func (h *Handlers) PingHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// UpdatesHandler обрабатывает POST запросы для обновления множества метрик в JSON формате
+func (h *Handlers) UpdatesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Content-Type") != "application/json" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	var metrics []models.Metrics
+	if err := json.NewDecoder(r.Body).Decode(&metrics); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	if len(metrics) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	// Обновляем все метрики в батче одной операцией
+	if err := h.storage.UpdateBatch(metrics); err != nil {
+		log.Printf("Failed to update batch: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
 }

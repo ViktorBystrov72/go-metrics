@@ -154,6 +154,53 @@ func sendMetric(metric models.Metrics) error {
 	return nil
 }
 
+// sendMetricsBatch отправляет множество метрик одним запросом
+func sendMetricsBatch(metrics []models.Metrics) error {
+	if len(metrics) == 0 {
+		return nil // Не отправляем пустые батчи
+	}
+
+	url, err := url.JoinPath(flagRunAddr, "updates/")
+	if err != nil {
+		return fmt.Errorf("error joining URL: %w", err)
+	}
+
+	body, err := json.Marshal(metrics)
+	if err != nil {
+		return fmt.Errorf("marshal error: %w", err)
+	}
+
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	_, err = gz.Write(body)
+	if err != nil {
+		return fmt.Errorf("gzip write error: %w", err)
+	}
+	if err := gz.Close(); err != nil {
+		return fmt.Errorf("gzip close error: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, &buf)
+	if err != nil {
+		return fmt.Errorf("error creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("error sending batch request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+	return nil
+}
+
 func main() {
 	if err := parseFlags(); err != nil {
 		log.Fatal(err)
@@ -179,11 +226,22 @@ func main() {
 				Delta: &pc,
 			}
 		case <-reportTicker.C:
+			var metricsToSend []models.Metrics
 			for _, metric := range metricsMap {
-				if err := sendMetric(metric); err != nil {
-					log.Printf("Error sending metric %s: %v", metric.ID, err)
+				metricsToSend = append(metricsToSend, metric)
+			}
+
+			// Отправляем все метрики одним batch запросом
+			if err := sendMetricsBatch(metricsToSend); err != nil {
+				log.Printf("Error sending metrics batch: %v", err)
+				// Fallback: отправляем по одной метрике при ошибке batch
+				for _, metric := range metricsMap {
+					if err := sendMetric(metric); err != nil {
+						log.Printf("Error sending metric %s: %v", metric.ID, err)
+					}
 				}
 			}
+
 			metricsMap = make(map[string]models.Metrics)
 			pollCount = 0
 		}

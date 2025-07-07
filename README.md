@@ -6,8 +6,9 @@
 
 - Сбор метрик runtime (gauge и counter)
 - HTTP API для получения и обновления метрик
+- Batch API для массового обновления метрик
 - Поддержка сжатия gzip
-- **PostgreSQL как основное хранилище метрик**
+- PostgreSQL как основное хранилище метрик
 - Автоматический fallback: PostgreSQL → файл → память
 - Проверка соединения с базой данных через `/ping`
 
@@ -18,6 +19,8 @@
 1. **PostgreSQL** - если указан `DATABASE_DSN` и подключение успешно
 2. **Файловое хранилище** - если PostgreSQL недоступен, но указан путь к файлу
 3. **Хранилище в памяти** - если ни PostgreSQL, ни файл недоступны
+
+**Важно:** Если `DATABASE_DSN` указан, но подключение к БД не удалось, сервер использует `BrokenStorage` и `/ping` возвращает 500.
 
 ## Запуск
 
@@ -122,6 +125,33 @@ Content-Type: application/json
 }
 ```
 
+### Batch API
+
+```http
+POST /updates/
+Content-Type: application/json
+
+[
+  {
+    "id": "Alloc",
+    "type": "gauge",
+    "value": 123.45
+  },
+  {
+    "id": "PollCount",
+    "type": "counter",
+    "delta": 42
+  }
+]
+```
+
+**Особенности Batch API:**
+- Обновляет множество метрик в одной операции
+- В PostgreSQL все изменения выполняются в одной транзакции
+- Поддерживает gzip сжатие
+- Не отправляет пустые батчи
+- Обратная совместимость с существующими API
+
 ## База данных
 
 При использовании PostgreSQL автоматически создается таблица `metrics` со следующей структурой:
@@ -156,13 +186,42 @@ cd cmd/server && go build -o server
 cd cmd/agent && go build -o agent
 ```
 
+## Агент
+
+Агент автоматически собирает метрики runtime и отправляет их на сервер:
+
+- **Batch отправка** - агент отправляет все метрики одним запросом через `/updates/`
+- **Fallback** - при ошибке batch отправки агент переключается на отправку по одной метрике
+- **Gzip сжатие** - все запросы сжимаются
+- **Настраиваемые интервалы** - можно настроить частоту сбора и отправки метрик
+
+### Параметры агента
+
+- `-a` - адрес сервера (по умолчанию: localhost:8080)
+- `-r` - интервал отправки в секундах (по умолчанию: 10)
+- `-p` - интервал сбора в секундах (по умолчанию: 2)
+
+### Переменные окружения агента
+
+- `ADDRESS` - адрес сервера
+- `REPORT_INTERVAL` - интервал отправки в секундах
+- `POLL_INTERVAL` - интервал сбора в секундах
+
 ## Тестирование
 
 ```bash
 # Запуск тестов
 go test ./...
 
+# Тесты итерации 7 (файловое хранилище)
 metricstest -test.v -test.run=^TestIteration7$ -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=.
 
+# Тесты итерации 10 (PostgreSQL + fallback)
+metricstest -test.v -test.run='^TestIteration10A$|^TestIteration10B$' -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=. -database-dsn="postgres://user:pass@localhost:5432/dbname?sslmode=disable"
+
+# Тесты итерации 11 (PostgreSQL)
 metricstest -test.v -test.run=^TestIteration11$ -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=. -database-dsn="postgres://user:pass@localhost:5432/dbname?sslmode=disable"
+
+# Тесты итерации 12 (Batch API)
+metricstest -test.v -test.run=^TestIteration12$ -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=. -database-dsn="postgres://user:pass@localhost:5432/dbname?sslmode=disable"
 ```

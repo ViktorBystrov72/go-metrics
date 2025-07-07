@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ViktorBystrov72/go-metrics/internal/models"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -209,3 +210,76 @@ func (b *BrokenStorage) LoadFromFile(filename string) error     { return fmt.Err
 func (b *BrokenStorage) Ping() error                            { return fmt.Errorf("storage unavailable") }
 func (b *BrokenStorage) IsDatabase() bool                       { return true }
 func (b *BrokenStorage) IsAvailable() bool                      { return false }
+
+// UpdateBatch для BrokenStorage всегда возвращает ошибку
+func (b *BrokenStorage) UpdateBatch(metrics []models.Metrics) error {
+	return fmt.Errorf("storage unavailable")
+}
+
+// UpdateBatch обновляет множество метрик в одной транзакции
+func (d *DatabaseStorage) UpdateBatch(metrics []models.Metrics) error {
+	if len(metrics) == 0 {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Начинаем транзакцию
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Подготавливаем запросы для gauge и counter
+	gaugeStmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO metrics (name, type, value) 
+		VALUES ($1, 'gauge', $2)
+		ON CONFLICT (name, type) 
+		DO UPDATE SET value = $2, created_at = CURRENT_TIMESTAMP
+		WHERE metrics.name = $1 AND metrics.type = 'gauge'
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare gauge statement: %w", err)
+	}
+	defer gaugeStmt.Close()
+
+	counterStmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO metrics (name, type, delta) 
+		VALUES ($1, 'counter', $2)
+		ON CONFLICT (name, type) 
+		DO UPDATE SET delta = metrics.delta + $2, created_at = CURRENT_TIMESTAMP
+		WHERE metrics.name = $1 AND metrics.type = 'counter'
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare counter statement: %w", err)
+	}
+	defer counterStmt.Close()
+
+	// Выполняем все обновления в транзакции
+	for _, m := range metrics {
+		switch m.MType {
+		case "gauge":
+			if m.Value == nil {
+				return fmt.Errorf("gauge metric %s has nil value", m.ID)
+			}
+			_, err := gaugeStmt.ExecContext(ctx, m.ID, *m.Value)
+			if err != nil {
+				return fmt.Errorf("failed to update gauge metric %s: %w", m.ID, err)
+			}
+		case "counter":
+			if m.Delta == nil {
+				return fmt.Errorf("counter metric %s has nil delta", m.ID)
+			}
+			_, err := counterStmt.ExecContext(ctx, m.ID, *m.Delta)
+			if err != nil {
+				return fmt.Errorf("failed to update counter metric %s: %w", m.ID, err)
+			}
+		default:
+			return fmt.Errorf("unknown metric type: %s", m.MType)
+		}
+	}
+
+	return tx.Commit()
+}

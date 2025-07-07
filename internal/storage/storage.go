@@ -1,5 +1,7 @@
 package storage
 
+import "github.com/ViktorBystrov72/go-metrics/internal/models"
+
 // Storage интерфейс для хранения метрик
 type Storage interface {
 	// UpdateGauge обновляет значение gauge метрики
@@ -34,4 +36,7 @@ type Storage interface {
 
 	// IsAvailable возвращает true, если хранилище доступно
 	IsAvailable() bool
+
+	// UpdateBatch обновляет множество метрик в одной операции
+	UpdateBatch(metrics []models.Metrics) error
 }

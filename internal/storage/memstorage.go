@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"sync"
+
+	"github.com/ViktorBystrov72/go-metrics/internal/models"
 )
 
 // MemStorage реализация хранилища в памяти
@@ -149,4 +151,33 @@ func (s *MemStorage) IsDatabase() bool {
 // IsAvailable всегда true для памяти
 func (s *MemStorage) IsAvailable() bool {
 	return true
+}
+
+// UpdateBatch обновляет множество метрик в одной операции
+func (s *MemStorage) UpdateBatch(metrics []models.Metrics) error {
+	if len(metrics) == 0 {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, m := range metrics {
+		switch m.MType {
+		case "gauge":
+			if m.Value == nil {
+				return fmt.Errorf("gauge metric %s has nil value", m.ID)
+			}
+			s.gauges[m.ID] = *m.Value
+		case "counter":
+			if m.Delta == nil {
+				return fmt.Errorf("counter metric %s has nil delta", m.ID)
+			}
+			s.counters[m.ID] += *m.Delta
+		default:
+			return fmt.Errorf("unknown metric type: %s", m.MType)
+		}
+	}
+
+	return nil
 }

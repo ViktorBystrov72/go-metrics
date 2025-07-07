@@ -43,6 +43,7 @@ func NewRouter(storage storage.Storage) *Router {
 	// JSON API
 	router.Post("/update/", handlers.UpdateJSONHandler)
 	router.Post("/value/", handlers.ValueJSONHandler)
+	router.Post("/updates/", handlers.UpdatesHandler)
 
 	return &Router{
 		handlers: handlers,
