@@ -36,7 +36,7 @@ func TestCollectMetrics(t *testing.T) {
 	}
 }
 
-func TestSendMetric(t *testing.T) {
+func TestSendMetricsBatch(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
@@ -46,13 +46,21 @@ func TestSendMetric(t *testing.T) {
 
 	flagRunAddr = server.URL
 
-	val := 123.45
-	metric := models.Metrics{
-		ID:    "testMetric",
-		MType: "gauge",
-		Value: &val,
+	val1 := 123.45
+	val2 := 67.89
+	metrics := []models.Metrics{
+		{
+			ID:    "testMetric1",
+			MType: "gauge",
+			Value: &val1,
+		},
+		{
+			ID:    "testMetric2",
+			MType: "gauge",
+			Value: &val2,
+		},
 	}
 
-	err := sendMetric(metric)
+	err := sendMetricsBatch(metrics)
 	require.NoError(t, err)
 }

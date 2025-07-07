@@ -34,12 +34,14 @@ func TestMemStorage_SaveToFile_LoadFromFile(t *testing.T) {
 	}
 
 	// Проверяем что данные загрузились корректно
-	if gauge, exists := newStorage.GetGauge("test_gauge"); !exists || gauge != 123.45 {
-		t.Errorf("Expected gauge value 123.45, got %f, exists: %v", gauge, exists)
+	gauge, err := newStorage.GetGauge("test_gauge")
+	if err != nil || gauge != 123.45 {
+		t.Errorf("Expected gauge value 123.45, got %f, error: %v", gauge, err)
 	}
 
-	if counter, exists := newStorage.GetCounter("test_counter"); !exists || counter != 50 {
-		t.Errorf("Expected counter value 50, got %d, exists: %v", counter, exists)
+	counter, err := newStorage.GetCounter("test_counter")
+	if err != nil || counter != 50 {
+		t.Errorf("Expected counter value 50, got %d, error: %v", counter, err)
 	}
 }
 

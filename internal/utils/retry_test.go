@@ -84,6 +84,21 @@ func TestIsRetriableError(t *testing.T) {
 			err:      errors.New("temporary error"),
 			expected: true,
 		},
+		{
+			name:     "case insensitive connection refused",
+			err:      errors.New("CONNECTION REFUSED"),
+			expected: true,
+		},
+		{
+			name:     "case insensitive timeout",
+			err:      errors.New("TIMEOUT ERROR"),
+			expected: true,
+		},
+		{
+			name:     "mixed case server overloaded",
+			err:      errors.New("Server Overloaded"),
+			expected: true,
+		},
 	}
 
 	for _, tt := range tests {

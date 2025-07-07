@@ -22,13 +22,11 @@ func main() {
 	if cfg.DatabaseDSN != "" {
 		dbStorage, err := storage.NewDatabaseStorage(cfg.DatabaseDSN)
 		if err != nil {
-			log.Printf("Failed to connect to database: %v, database unavailable", err)
-			storageInstance = &storage.BrokenStorage{}
-		} else {
-			defer dbStorage.Close()
-			storageInstance = dbStorage
-			log.Printf("Using PostgreSQL storage")
+			log.Fatalf("Failed to connect to database: %v", err)
 		}
+		defer dbStorage.Close()
+		storageInstance = dbStorage
+		log.Printf("Using PostgreSQL storage")
 	} else if cfg.FileStoragePath != "" {
 		fileStorage := storage.NewMemStorage()
 		if cfg.Restore {

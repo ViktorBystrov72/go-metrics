@@ -250,12 +250,12 @@ func TestServer_FileStorage_Integration(t *testing.T) {
 	err = newStorage.LoadFromFile(tempFile)
 	require.NoError(t, err)
 
-	gauge, exists := newStorage.GetGauge("test_gauge")
-	require.True(t, exists)
+	gauge, err := newStorage.GetGauge("test_gauge")
+	require.NoError(t, err)
 	assert.Equal(t, 123.45, gauge)
 
-	counter, exists := newStorage.GetCounter("test_counter")
-	require.True(t, exists)
+	counter, err := newStorage.GetCounter("test_counter")
+	require.NoError(t, err)
 	assert.Equal(t, int64(42), counter)
 }
 
@@ -279,8 +279,8 @@ func TestServer_StoreInterval_Zero(t *testing.T) {
 	err = newStorage.LoadFromFile(tempFile)
 	require.NoError(t, err)
 
-	gauge, exists := newStorage.GetGauge("sync_test")
-	require.True(t, exists)
+	gauge, err := newStorage.GetGauge("sync_test")
+	require.NoError(t, err)
 	assert.Equal(t, 99.99, gauge)
 }
 
@@ -340,11 +340,11 @@ func TestServer_FileStorage_ConcurrentAccess(t *testing.T) {
 	assert.Equal(t, 5, len(counters))
 
 	for i := 0; i < 5; i++ {
-		gauge, exists := newStorage.GetGauge("concurrent_gauge_" + string(rune(i)))
-		require.True(t, exists)
+		gauge, err := newStorage.GetGauge("concurrent_gauge_" + string(rune(i)))
+		require.NoError(t, err)
 		assert.Equal(t, float64(i), gauge)
-		counter, exists := newStorage.GetCounter("concurrent_counter_" + string(rune(i)))
-		require.True(t, exists)
+		counter, err := newStorage.GetCounter("concurrent_counter_" + string(rune(i)))
+		require.NoError(t, err)
 		assert.Equal(t, int64(i), counter)
 	}
 }

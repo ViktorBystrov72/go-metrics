@@ -39,19 +39,29 @@ func (s *MemStorage) UpdateCounter(name string, value int64) {
 }
 
 // GetGauge возвращает значение gauge метрики
-func (s *MemStorage) GetGauge(name string) (float64, bool) {
+func (s *MemStorage) GetGauge(name string) (float64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	value, exists := s.gauges[name]
-	return value, exists
+	if !exists {
+		return 0, fmt.Errorf("gauge metric %s not found", name)
+	}
+
+	return value, nil
 }
 
 // GetCounter возвращает значение counter метрики
-func (s *MemStorage) GetCounter(name string) (int64, bool) {
+func (s *MemStorage) GetCounter(name string) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	value, exists := s.counters[name]
-	return value, exists
+	if !exists {
+		return 0, fmt.Errorf("counter metric %s not found", name)
+	}
+
+	return value, nil
 }
 
 // GetAllGauges возвращает все gauge метрики

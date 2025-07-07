@@ -45,7 +45,14 @@
 
 1. **MemoryStorage** - хранение в памяти (по умолчанию)
 2. **FileStorage** - хранение в JSON файле
-3. **DatabaseStorage** - хранение в PostgreSQL с retry логикой
+3. **DatabaseStorage** - хранение в PostgreSQL с retry логикой и pgxpool
+
+### Технологии
+
+- **PostgreSQL** - используется pgxpool для эффективного пула соединений
+- **Retry логика** - автоматические повторы при временных ошибках
+- **Gzip сжатие** - для HTTP запросов
+- **Batch API** - для массового обновления метрик
 
 ## Установка и запуск
 
@@ -53,10 +60,29 @@
 - Go 1.21+
 - PostgreSQL (опционально)
 
+### Запуск PostgreSQL через Docker Compose
+
+```bash
+docker compose up -d
+```
+
+Проверка, что база данных запущена:
+
+```bash
+docker compose ps
+```
+
+Подключитесь к базе данных (опционально):
+
+```bash
+docker compose exec postgres psql -U postgres -d praktikum
+```
+
 ### Сборка
 ```bash
 go build -o bin/agent cmd/agent/main.go
 go build -o bin/server cmd/server/main.go
+go build -o bin/migrate cmd/migrate/main.go
 ```
 
 ### Запуск сервера
@@ -182,3 +208,62 @@ curl -X POST "http://localhost:8080/updates/" \
   --data-binary @-
 ```
 
+## Агент
+
+Агент автоматически собирает метрики runtime и отправляет их на сервер:
+
+- **Batch отправка** - агент отправляет все метрики одним запросом через `/updates/`
+- **Gzip сжатие** - все запросы сжимаются
+- **Retry логика** - автоматические повторы при временных ошибках
+- **Настраиваемые интервалы** - можно настроить частоту сбора и отправки метрик
+
+### Параметры агента
+
+- `-a` - адрес сервера (по умолчанию: localhost:8080)
+- `-r` - интервал отправки в секундах (по умолчанию: 10)
+- `-p` - интервал сбора в секундах (по умолчанию: 2)
+
+### Переменные окружения агента
+
+- `ADDRESS` - адрес сервера
+- `REPORT_INTERVAL` - интервал отправки в секундах
+- `POLL_INTERVAL` - интервал сбора в секундах
+
+## База данных
+
+### Миграции
+
+Сервис использует [goose](https://github.com/pressly/goose) для управления миграциями базы данных:
+
+```bash
+# Применить миграции
+./bin/migrate -dsn="postgres://user:pass@localhost:5432/dbname?sslmode=disable" -command=up
+
+# Проверить статус миграций
+./bin/migrate -dsn="postgres://user:pass@localhost:5432/dbname?sslmode=disable" -command=status
+```
+
+### Структура базы данных
+
+Миграции автоматически создают таблицу `metrics` со следующей структурой:
+
+```sql
+CREATE TABLE metrics (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    type VARCHAR(50) NOT NULL,
+    value DOUBLE PRECISION,
+    delta BIGINT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(name, type)
+);
+
+CREATE INDEX idx_metrics_name_type ON metrics(name, type);
+CREATE INDEX idx_metrics_created_at ON metrics(created_at);
+```
+
+**Особенности PostgreSQL хранилища:**
+- Автоматическое применение миграций при запуске
+- Используется pgxpool для эффективного пула соединений
+- Метрики сохраняются сразу при обновлении
+- Поддержка уникальных ограничений для предотвращения дублирования

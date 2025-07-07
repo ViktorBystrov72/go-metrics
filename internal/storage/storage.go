@@ -11,10 +11,10 @@ type Storage interface {
 	UpdateCounter(name string, value int64)
 
 	// GetGauge возвращает значение gauge метрики
-	GetGauge(name string) (float64, bool)
+	GetGauge(name string) (float64, error)
 
 	// GetCounter возвращает значение counter метрики
-	GetCounter(name string) (int64, bool)
+	GetCounter(name string) (int64, error)
 
 	// GetAllGauges возвращает все gauge метрики
 	GetAllGauges() map[string]float64

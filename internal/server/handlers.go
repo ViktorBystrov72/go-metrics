@@ -78,8 +78,8 @@ func (h *Handlers) ValueHandler(w http.ResponseWriter, r *http.Request) {
 
 	switch metricType {
 	case string(storage.Gauge):
-		value, exists := h.storage.GetGauge(name)
-		if !exists {
+		value, err := h.storage.GetGauge(name)
+		if err != nil {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -88,8 +88,8 @@ func (h *Handlers) ValueHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Ошибка при записи ответа в ValueHandler (gauge): %v", err)
 		}
 	case string(storage.Counter):
-		value, exists := h.storage.GetCounter(name)
-		if !exists {
+		value, err := h.storage.GetCounter(name)
+		if err != nil {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -199,8 +199,8 @@ func (h *Handlers) UpdateJSONHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		h.storage.UpdateCounter(m.ID, *m.Delta)
 		// Получаем актуальное значение после обновления
-		v, ok := h.storage.GetCounter(m.ID)
-		if !ok {
+		v, err := h.storage.GetCounter(m.ID)
+		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -232,15 +232,15 @@ func (h *Handlers) ValueJSONHandler(w http.ResponseWriter, r *http.Request) {
 	resp.MType = m.MType
 	switch m.MType {
 	case "gauge":
-		v, ok := h.storage.GetGauge(m.ID)
-		if !ok {
+		v, err := h.storage.GetGauge(m.ID)
+		if err != nil {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 		resp.Value = &v
 	case "counter":
-		v, ok := h.storage.GetCounter(m.ID)
-		if !ok {
+		v, err := h.storage.GetCounter(m.ID)
+		if err != nil {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}

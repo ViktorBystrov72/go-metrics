@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgerrcode"
@@ -20,7 +21,7 @@ type RetryConfig struct {
 // DefaultRetryConfig возвращает стандартную конфигурацию retry
 func DefaultRetryConfig() RetryConfig {
 	return RetryConfig{
-		MaxAttempts: 4, // 1 основная попытка + 3 повтора
+		MaxAttempts: 4,
 		Delays:      []time.Duration{1 * time.Second, 3 * time.Second, 5 * time.Second},
 	}
 }
@@ -66,7 +67,7 @@ func IsRetriableError(err error) bool {
 	}
 
 	for _, pattern := range retriablePatterns {
-		if contains(errText, pattern) {
+		if strings.Contains(strings.ToLower(errText), strings.ToLower(pattern)) {
 			return true
 		}
 	}
@@ -79,7 +80,6 @@ func Retry(ctx context.Context, config RetryConfig, fn func() error) error {
 	var lastErr error
 
 	for attempt := 0; attempt < config.MaxAttempts; attempt++ {
-		// Проверяем контекст перед каждой попыткой
 		if ctx.Err() != nil {
 			return fmt.Errorf("context cancelled: %w", ctx.Err())
 		}
@@ -95,7 +95,6 @@ func Retry(ctx context.Context, config RetryConfig, fn func() error) error {
 			return fmt.Errorf("non-retriable error: %w", err)
 		}
 
-		// Если это последняя попытка, возвращаем ошибку
 		if attempt == config.MaxAttempts-1 {
 			return fmt.Errorf("max attempts reached (%d), last error: %w", config.MaxAttempts, err)
 		}
@@ -124,23 +123,4 @@ func RetryWithBackoff(ctx context.Context, maxAttempts int, baseDelay time.Durat
 	}
 
 	return Retry(ctx, config, fn)
-}
-
-// contains проверяет, содержит ли строка подстроку (case-insensitive)
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) &&
-		(len(s) == len(substr) && s == substr ||
-			len(s) > len(substr) && (s[:len(substr)] == substr ||
-				s[len(s)-len(substr):] == substr ||
-				containsSubstring(s, substr)))
-}
-
-// containsSubstring простая проверка на подстроку
-func containsSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
