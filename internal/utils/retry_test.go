@@ -50,11 +50,6 @@ func TestIsRetriableError(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:     "retriable network error",
-			err:      &MockRetriableError{message: "connection refused"},
-			expected: true,
-		},
-		{
 			name:     "connection refused text",
 			err:      errors.New("connection refused"),
 			expected: true,
@@ -82,6 +77,11 @@ func TestIsRetriableError(t *testing.T) {
 		{
 			name:     "too many connections text",
 			err:      errors.New("too many connections"),
+			expected: true,
+		},
+		{
+			name:     "temporary error text",
+			err:      errors.New("temporary error"),
 			expected: true,
 		},
 	}
@@ -124,8 +124,10 @@ func TestRetry_Success(t *testing.T) {
 }
 
 func TestRetry_MaxAttemptsReached(t *testing.T) {
+	attempts := 0
 	fn := func() error {
-		return errors.New("permanent error")
+		attempts++
+		return errors.New("temporary error")
 	}
 
 	config := RetryConfig{
@@ -140,8 +142,13 @@ func TestRetry_MaxAttemptsReached(t *testing.T) {
 		t.Error("Retry() should return error when max attempts reached")
 	}
 
-	if !errors.Is(err, errors.New("max attempts reached (3), last error: permanent error")) {
-		t.Errorf("Unexpected error: %v", err)
+	expectedErrorText := "max attempts reached (3), last error: temporary error"
+	if err.Error() != expectedErrorText {
+		t.Errorf("Expected error: %s, got: %s", expectedErrorText, err.Error())
+	}
+
+	if attempts != 3 {
+		t.Errorf("Expected 3 attempts, got %d", attempts)
 	}
 }
 

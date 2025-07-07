@@ -34,13 +34,7 @@ func IsRetriableError(err error) bool {
 	// Проверяем сетевые ошибки
 	var netErr net.Error
 	if errors.As(err, &netErr) {
-		return netErr.Temporary() || netErr.Timeout()
-	}
-
-	// Проверяем ошибки DNS
-	var dnsErr *net.DNSError
-	if errors.As(err, &dnsErr) {
-		return dnsErr.Temporary()
+		return netErr.Timeout()
 	}
 
 	// Проверяем PostgreSQL ошибки класса 08 (Connection Exception)
@@ -68,6 +62,7 @@ func IsRetriableError(err error) bool {
 		"server overloaded",
 		"too many connections",
 		"connection limit exceeded",
+		"temporary error",
 	}
 
 	for _, pattern := range retriablePatterns {
@@ -89,7 +84,6 @@ func Retry(ctx context.Context, config RetryConfig, fn func() error) error {
 			return fmt.Errorf("context cancelled: %w", ctx.Err())
 		}
 
-		// Выполняем функцию
 		err := fn()
 		if err == nil {
 			return nil // Успех
@@ -97,7 +91,6 @@ func Retry(ctx context.Context, config RetryConfig, fn func() error) error {
 
 		lastErr = err
 
-		// Проверяем, является ли ошибка retriable
 		if !IsRetriableError(err) {
 			return fmt.Errorf("non-retriable error: %w", err)
 		}
@@ -107,7 +100,6 @@ func Retry(ctx context.Context, config RetryConfig, fn func() error) error {
 			return fmt.Errorf("max attempts reached (%d), last error: %w", config.MaxAttempts, err)
 		}
 
-		// Ждем перед следующей попыткой
 		delay := config.Delays[attempt]
 		select {
 		case <-time.After(delay):
