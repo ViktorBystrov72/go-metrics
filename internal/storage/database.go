@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/ViktorBystrov72/go-metrics/internal/models"
+	"github.com/ViktorBystrov72/go-metrics/internal/utils"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -78,7 +80,17 @@ func (d *DatabaseStorage) UpdateGauge(name string, value float64) {
 	WHERE metrics.name = $1 AND metrics.type = 'gauge'
 	`
 
-	_, _ = d.db.Exec(query, name, value)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := utils.Retry(ctx, utils.DefaultRetryConfig(), func() error {
+		_, err := d.db.ExecContext(ctx, query, name, value)
+		return err
+	})
+
+	if err != nil {
+		log.Printf("Failed to update gauge metric %s after retries: %v", name, err)
+	}
 }
 
 // UpdateCounter обновляет counter метрику в базе данных
@@ -91,7 +103,17 @@ func (d *DatabaseStorage) UpdateCounter(name string, value int64) {
 	WHERE metrics.name = $1 AND metrics.type = 'counter'
 	`
 
-	_, _ = d.db.Exec(query, name, value)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := utils.Retry(ctx, utils.DefaultRetryConfig(), func() error {
+		_, err := d.db.ExecContext(ctx, query, name, value)
+		return err
+	})
+
+	if err != nil {
+		log.Printf("Failed to update counter metric %s after retries: %v", name, err)
+	}
 }
 
 // GetGauge получает gauge метрику из базы данных
@@ -99,7 +121,13 @@ func (d *DatabaseStorage) GetGauge(name string) (float64, bool) {
 	var value float64
 	query := `SELECT value FROM metrics WHERE name = $1 AND type = 'gauge' ORDER BY created_at DESC LIMIT 1`
 
-	err := d.db.QueryRow(query, name).Scan(&value)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := utils.Retry(ctx, utils.DefaultRetryConfig(), func() error {
+		return d.db.QueryRowContext(ctx, query, name).Scan(&value)
+	})
+
 	if err != nil {
 		return 0, false
 	}
@@ -112,7 +140,13 @@ func (d *DatabaseStorage) GetCounter(name string) (int64, bool) {
 	var value int64
 	query := `SELECT delta FROM metrics WHERE name = $1 AND type = 'counter' ORDER BY created_at DESC LIMIT 1`
 
-	err := d.db.QueryRow(query, name).Scan(&value)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := utils.Retry(ctx, utils.DefaultRetryConfig(), func() error {
+		return d.db.QueryRowContext(ctx, query, name).Scan(&value)
+	})
+
 	if err != nil {
 		return 0, false
 	}
@@ -216,7 +250,7 @@ func (b *BrokenStorage) UpdateBatch(metrics []models.Metrics) error {
 	return fmt.Errorf("storage unavailable")
 }
 
-// UpdateBatch обновляет множество метрик в одной транзакции
+// UpdateBatch обновляет множество метрик в базе данных
 func (d *DatabaseStorage) UpdateBatch(metrics []models.Metrics) error {
 	if len(metrics) == 0 {
 		return nil
@@ -225,61 +259,102 @@ func (d *DatabaseStorage) UpdateBatch(metrics []models.Metrics) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Начинаем транзакцию
-	tx, err := d.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	// Подготавливаем запросы для gauge и counter
-	gaugeStmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO metrics (name, type, value) 
-		VALUES ($1, 'gauge', $2)
-		ON CONFLICT (name, type) 
-		DO UPDATE SET value = $2, created_at = CURRENT_TIMESTAMP
-		WHERE metrics.name = $1 AND metrics.type = 'gauge'
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to prepare gauge statement: %w", err)
-	}
-	defer gaugeStmt.Close()
-
-	counterStmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO metrics (name, type, delta) 
-		VALUES ($1, 'counter', $2)
-		ON CONFLICT (name, type) 
-		DO UPDATE SET delta = metrics.delta + $2, created_at = CURRENT_TIMESTAMP
-		WHERE metrics.name = $1 AND metrics.type = 'counter'
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to prepare counter statement: %w", err)
-	}
-	defer counterStmt.Close()
-
-	// Выполняем все обновления в транзакции
-	for _, m := range metrics {
-		switch m.MType {
-		case "gauge":
-			if m.Value == nil {
-				return fmt.Errorf("gauge metric %s has nil value", m.ID)
-			}
-			_, err := gaugeStmt.ExecContext(ctx, m.ID, *m.Value)
-			if err != nil {
-				return fmt.Errorf("failed to update gauge metric %s: %w", m.ID, err)
-			}
-		case "counter":
-			if m.Delta == nil {
-				return fmt.Errorf("counter metric %s has nil delta", m.ID)
-			}
-			_, err := counterStmt.ExecContext(ctx, m.ID, *m.Delta)
-			if err != nil {
-				return fmt.Errorf("failed to update counter metric %s: %w", m.ID, err)
-			}
-		default:
-			return fmt.Errorf("unknown metric type: %s", m.MType)
+	return utils.Retry(ctx, utils.DefaultRetryConfig(), func() error {
+		tx, err := d.db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("failed to begin transaction: %w", err)
 		}
+		defer tx.Rollback()
+
+		// Подготавливаем запросы для gauge и counter метрик
+		gaugeStmt, err := tx.PrepareContext(ctx, `
+			INSERT INTO metrics (name, type, value) 
+			VALUES ($1, 'gauge', $2)
+			ON CONFLICT (name, type) 
+			DO UPDATE SET value = $2, created_at = CURRENT_TIMESTAMP
+			WHERE metrics.name = $1 AND metrics.type = 'gauge'
+		`)
+		if err != nil {
+			return fmt.Errorf("failed to prepare gauge statement: %w", err)
+		}
+		defer gaugeStmt.Close()
+
+		counterStmt, err := tx.PrepareContext(ctx, `
+			INSERT INTO metrics (name, type, delta) 
+			VALUES ($1, 'counter', $2)
+			ON CONFLICT (name, type) 
+			DO UPDATE SET delta = metrics.delta + $2, created_at = CURRENT_TIMESTAMP
+			WHERE metrics.name = $1 AND metrics.type = 'counter'
+		`)
+		if err != nil {
+			return fmt.Errorf("failed to prepare counter statement: %w", err)
+		}
+		defer counterStmt.Close()
+
+		// Выполняем обновления
+		for _, metric := range metrics {
+			switch metric.MType {
+			case "gauge":
+				if metric.Value != nil {
+					_, err = gaugeStmt.ExecContext(ctx, metric.ID, *metric.Value)
+					if err != nil {
+						return fmt.Errorf("failed to update gauge metric %s: %w", metric.ID, err)
+					}
+				}
+			case "counter":
+				if metric.Delta != nil {
+					_, err = counterStmt.ExecContext(ctx, metric.ID, *metric.Delta)
+					if err != nil {
+						return fmt.Errorf("failed to update counter metric %s: %w", metric.ID, err)
+					}
+				}
+			default:
+				return fmt.Errorf("unknown metric type: %s", metric.MType)
+			}
+		}
+
+		return tx.Commit()
+	})
+}
+
+// GetAllMetrics получает все метрики из базы данных
+func (d *DatabaseStorage) GetAllMetrics() map[string]interface{} {
+	metrics := make(map[string]interface{})
+	query := `SELECT name, type, value, delta FROM metrics ORDER BY created_at DESC`
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := utils.Retry(ctx, utils.DefaultRetryConfig(), func() error {
+		rows, err := d.db.QueryContext(ctx, query)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var name, metricType string
+			var value sql.NullFloat64
+			var delta sql.NullInt64
+
+			if err := rows.Scan(&name, &metricType, &value, &delta); err != nil {
+				return err
+			}
+
+			if metricType == "gauge" && value.Valid {
+				metrics[name] = value.Float64
+			} else if metricType == "counter" && delta.Valid {
+				metrics[name] = delta.Int64
+			}
+		}
+
+		return rows.Err()
+	})
+
+	if err != nil {
+		log.Printf("Failed to get all metrics after retries: %v", err)
+		return metrics
 	}
 
-	return tx.Commit()
+	return metrics
 }

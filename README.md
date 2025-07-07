@@ -1,217 +1,144 @@
-# Go Metrics Service
+# Сервис сбора метрик
 
-Сервис для сбора и хранения метрик с поддержкой PostgreSQL.
+Сервис для сбора и хранения метрик с поддержкой PostgreSQL и retry логики для обработки временных ошибок.
 
 ## Возможности
 
-- Сбор метрик runtime (gauge и counter)
-- HTTP API для получения и обновления метрик
-- Batch API для массового обновления метрик
-- Поддержка сжатия gzip
-- PostgreSQL как основное хранилище метрик
-- Автоматический fallback: PostgreSQL → файл → память
-- Проверка соединения с базой данных через `/ping`
+- Сбор метрик типа gauge и counter
+- Хранение в памяти, файле или PostgreSQL
+- Batch API для обновления множества метрик
+- Gzip сжатие для HTTP запросов
+- Retry логика для обработки временных ошибок**
+- Автоматический fallback между типами хранилищ
 
-## Логика выбора хранилища
+## Retry логика
 
-Сервер автоматически выбирает хранилище в следующем порядке приоритета:
+Сервис включает в себя интеллектуальную retry логику для обработки временных ошибок:
 
-1. **PostgreSQL** - если указан `DATABASE_DSN` и подключение успешно
-2. **Файловое хранилище** - если PostgreSQL недоступен, но указан путь к файлу
-3. **Хранилище в памяти** - если ни PostgreSQL, ни файл недоступны
+### Поддерживаемые retriable ошибки:
+- **Сетевые ошибки**: connection refused, connection reset, broken pipe
+- **PostgreSQL ошибки класса 08**: Connection Exception
+- **DNS ошибки**: временные ошибки разрешения имен
+- **Таймауты**: сетевые и HTTP таймауты
+- **Перегрузка сервера**: too many connections, server overloaded
 
-**Важно:** Если `DATABASE_DSN` указан, но подключение к БД не удалось, сервер использует `BrokenStorage` и `/ping` возвращает 500.
+### Настройки retry:
+- **Количество попыток**: 4 (1 основная + 3 повтора)
+- **Интервалы**: 1s, 3s, 5s между попытками
+- **Таймауты**: 10s для HTTP запросов, 30s общий таймаут
 
-## Запуск
+### Применение:
+- **Агент**: retry при отправке метрик на сервер
+- **Сервер**: retry при работе с PostgreSQL
+- **Batch операции**: retry для batch обновлений
 
-### С PostgreSQL (рекомендуется)
+## Архитектура
 
+### Компоненты
+
+1. **Agent** (`cmd/agent/`) - собирает метрики и отправляет на сервер
+2. **Server** (`cmd/server/`) - принимает и хранит метрики
+3. **Storage** (`internal/storage/`) - интерфейсы и реализации хранилищ
+4. **Utils** (`internal/utils/`) - утилиты, включая retry логику
+
+### Типы хранилищ
+
+1. **MemoryStorage** - хранение в памяти (по умолчанию)
+2. **FileStorage** - хранение в JSON файле
+3. **DatabaseStorage** - хранение в PostgreSQL с retry логикой
+
+## Установка и запуск
+
+### Требования
+- Go 1.21+
+- PostgreSQL (опционально)
+
+### Сборка
 ```bash
-# Через флаг командной строки
-./cmd/server/server -d "postgres://username:password@localhost:5432/dbname?sslmode=disable"
-
-# Через переменную окружения
-export DATABASE_DSN="postgres://username:password@localhost:5432/dbname?sslmode=disable"
-./cmd/server/server
+go build -o bin/agent cmd/agent/main.go
+go build -o bin/server cmd/server/main.go
 ```
 
-### С файловым хранилищем (fallback)
+### Запуск сервера
 
+#### С PostgreSQL:
 ```bash
-# Сервер автоматически переключится на файловое хранилище
-# если PostgreSQL недоступен
-./cmd/server/server -f /path/to/metrics.json
+DATABASE_DSN='postgres://postgres:postgres@localhost:5432/praktikum?sslmode=disable' ./bin/server
 ```
 
-### Только в памяти (fallback)
-
+#### С файловым хранилищем:
 ```bash
-# Сервер использует память, если ни PostgreSQL, ни файл недоступны
-./cmd/server/server
+./bin/server
 ```
 
-### Параметры конфигурации
-
-- `-a` - адрес и порт сервера (по умолчанию: localhost:8080)
-- `-d` - строка подключения к PostgreSQL
-- `-f` - путь к файлу для сохранения метрик (по умолчанию: /tmp/metrics-db.json)
-- `-i` - интервал сохранения в секунды (по умолчанию: 300)
-- `-r` - восстановление метрик при запуске (по умолчанию: true)
-
-### Переменные окружения
-
-- `ADDRESS` - адрес и порт сервера
-- `DATABASE_DSN` - строка подключения к PostgreSQL
-- `FILE_STORAGE_PATH` - путь к файлу для сохранения метрик
-- `STORE_INTERVAL` - интервал сохранения в секундах
-- `RESTORE` - восстановление метрик при запуске
+### Запуск агента:
+```bash
+./bin/agent
+```
 
 ## API
 
-### Проверка соединения с БД
-
-```http
-GET /ping
-```
-
-**Ответ:**
-- `200 OK` - соединение с БД установлено
-- `500 Internal Server Error` - ошибка соединения с БД
-
-### Обновление метрик
-
+### Обновление метрики
 ```http
 POST /update/{type}/{name}/{value}
 ```
 
-**Примеры:**
-```bash
-curl -X POST "http://localhost:8080/update/gauge/Alloc/123.45"
-curl -X POST "http://localhost:8080/update/counter/PollCount/1"
-```
-
-### Получение метрик
-
+### Batch обновление метрик
 ```http
-GET /value/{type}/{name}
-```
-
-**Примеры:**
-```bash
-curl "http://localhost:8080/value/gauge/Alloc"
-curl "http://localhost:8080/value/counter/PollCount"
-```
-
-### JSON API
-
-```http
-POST /update/
+POST /updates/
 Content-Type: application/json
+Content-Encoding: gzip
 
-{
-  "id": "Alloc",
-  "type": "gauge",
-  "value": 123.45
-}
+[
+  {
+    "id": "metric1",
+    "type": "gauge",
+    "value": 123.45
+  },
+  {
+    "id": "metric2", 
+    "type": "counter",
+    "delta": 10
+  }
+]
 ```
 
+### Получение значения метрики
 ```http
 POST /value/
 Content-Type: application/json
 
 {
-  "id": "Alloc",
+  "id": "metric1",
   "type": "gauge"
 }
 ```
 
-### Batch API
+## Конфигурация
 
-```http
-POST /updates/
-Content-Type: application/json
+### Переменные окружения агента:
+- `ADDRESS` - адрес сервера (по умолчанию: localhost:8080)
+- `REPORT_INTERVAL` - интервал отправки метрик (по умолчанию: 10s)
+- `POLL_INTERVAL` - интервал сбора метрик (по умолчанию: 2s)
 
-[
-  {
-    "id": "Alloc",
-    "type": "gauge",
-    "value": 123.45
-  },
-  {
-    "id": "PollCount",
-    "type": "counter",
-    "delta": 42
-  }
-]
-```
+### Переменные окружения сервера:
+- `ADDRESS` - адрес для прослушивания (по умолчанию: localhost:8080)
+- `DATABASE_DSN` - строка подключения к PostgreSQL
+- `FILE_STORAGE_PATH` - путь к файлу для хранения метрик
+- `RESTORE` - восстанавливать метрики из файла (по умолчанию: true)
 
-**Особенности Batch API:**
-- Обновляет множество метрик в одной операции
-- В PostgreSQL все изменения выполняются в одной транзакции
-- Поддерживает gzip сжатие
-- Не отправляет пустые батчи
-- Обратная совместимость с существующими API
+## Логика выбора хранилища
 
-## База данных
-
-При использовании PostgreSQL автоматически создается таблица `metrics` со следующей структурой:
-
-```sql
-CREATE TABLE metrics (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    type VARCHAR(50) NOT NULL,
-    value DOUBLE PRECISION,
-    delta BIGINT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(name, type)
-);
-CREATE INDEX idx_metrics_name_type ON metrics(name, type);
-CREATE INDEX idx_metrics_created_at ON metrics(created_at);
-```
-
-**Особенности PostgreSQL хранилища:**
-- Метрики сохраняются сразу при обновлении (без периодического сохранения)
-- Используется `DOUBLE PRECISION` для gauge метрик
-- Автоматическое создание индексов для оптимизации запросов
-- Поддержка уникальных ограничений для предотвращения дублирования
-
-## Сборка
-
-```bash
-# Сборка сервера
-cd cmd/server && go build -o server
-
-# Сборка агента
-cd cmd/agent && go build -o agent
-```
-
-## Агент
-
-Агент автоматически собирает метрики runtime и отправляет их на сервер:
-
-- **Batch отправка** - агент отправляет все метрики одним запросом через `/updates/`
-- **Fallback** - при ошибке batch отправки агент переключается на отправку по одной метрике
-- **Gzip сжатие** - все запросы сжимаются
-- **Настраиваемые интервалы** - можно настроить частоту сбора и отправки метрик
-
-### Параметры агента
-
-- `-a` - адрес сервера (по умолчанию: localhost:8080)
-- `-r` - интервал отправки в секундах (по умолчанию: 10)
-- `-p` - интервал сбора в секундах (по умолчанию: 2)
-
-### Переменные окружения агента
-
-- `ADDRESS` - адрес сервера
-- `REPORT_INTERVAL` - интервал отправки в секундах
-- `POLL_INTERVAL` - интервал сбора в секундах
+1. Если указан `DATABASE_DSN` → PostgreSQL с retry логикой
+2. Если указан `FILE_STORAGE_PATH` → файловое хранилище
+3. Иначе → хранение в памяти
 
 ## Тестирование
 
+### Запуск тестов:
 ```bash
-# Запуск тестов
 go test ./...
+```
 
 # Тесты итерации 7 (файловое хранилище)
 metricstest -test.v -test.run=^TestIteration7$ -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=.
@@ -224,4 +151,34 @@ metricstest -test.v -test.run=^TestIteration11$ -agent-binary-path=cmd/agent/age
 
 # Тесты итерации 12 (Batch API)
 metricstest -test.v -test.run=^TestIteration12$ -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=. -database-dsn="postgres://user:pass@localhost:5432/dbname?sslmode=disable"
+
+### Тестирование retry логики:
+```bash
+# Тест с недоступным сервером
+./bin/agent  # Агент будет retry отправку метрик
+
+# Тест с недоступной PostgreSQL
+DATABASE_DSN='postgres://invalid:invalid@localhost:5432/invalid' ./bin/server
 ```
+
+### Бенчмарки:
+```bash
+go test -bench=. ./internal/storage/
+```
+
+## Примеры использования
+
+### Отправка метрики с retry:
+```bash
+curl -X POST "http://localhost:8080/update/gauge/test/123.45"
+```
+
+### Batch отправка с gzip:
+```bash
+echo '[{"id":"test","type":"gauge","value":123.45}]' | gzip | \
+curl -X POST "http://localhost:8080/updates/" \
+  -H "Content-Type: application/json" \
+  -H "Content-Encoding: gzip" \
+  --data-binary @-
+```
+
