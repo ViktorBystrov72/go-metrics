@@ -14,6 +14,7 @@ type Config struct {
 	FileStoragePath string
 	Restore         bool
 	DatabaseDSN     string
+	Key             string
 }
 
 // Load загружает конфигурацию из флагов и переменных окружения
@@ -24,6 +25,7 @@ func Load() (*Config, error) {
 		flagFileStoragePath string
 		flagRestore         bool
 		flagDatabaseDSN     string
+		flagKey             string
 	)
 
 	flag.StringVar(&flagRunAddr, "a", "localhost:8080", "address and port to run server")
@@ -31,6 +33,7 @@ func Load() (*Config, error) {
 	flag.StringVar(&flagFileStoragePath, "f", "/tmp/metrics-db.json", "file storage path")
 	flag.BoolVar(&flagRestore, "r", true, "restore from file on start")
 	flag.StringVar(&flagDatabaseDSN, "d", "", "database DSN")
+	flag.StringVar(&flagKey, "k", "", "signature key")
 	flag.Parse()
 
 	// Приоритет: env > flag > default
@@ -55,6 +58,9 @@ func Load() (*Config, error) {
 	if envDatabaseDSN := os.Getenv("DATABASE_DSN"); envDatabaseDSN != "" {
 		flagDatabaseDSN = envDatabaseDSN
 	}
+	if envKey := os.Getenv("KEY"); envKey != "" {
+		flagKey = envKey
+	}
 
 	if flagStoreInterval < 0 {
 		return nil, fmt.Errorf("STORE_INTERVAL must be non-negative, got %d", flagStoreInterval)
@@ -66,5 +72,6 @@ func Load() (*Config, error) {
 		FileStoragePath: flagFileStoragePath,
 		Restore:         flagRestore,
 		DatabaseDSN:     flagDatabaseDSN,
+		Key:             flagKey,
 	}, nil
 }

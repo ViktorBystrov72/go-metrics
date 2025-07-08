@@ -25,15 +25,18 @@ var (
 	flagRunAddr    string
 	reportInterval time.Duration
 	pollInterval   time.Duration
+	key            string
 )
 
 func parseFlags() error {
 	var a string
 	var r, p int
+	var k string
 
 	flag.StringVar(&a, "a", "localhost:8080", "address and port to run server")
 	flag.IntVar(&r, "r", 10, "report interval in seconds")
 	flag.IntVar(&p, "p", 2, "poll interval in seconds")
+	flag.StringVar(&k, "k", "", "signature key")
 	flag.Parse()
 
 	if envRunAddr := os.Getenv("ADDRESS"); envRunAddr != "" {
@@ -61,9 +64,14 @@ func parseFlags() error {
 		return fmt.Errorf("сonfiguration error: POLL_INTERVAL должен быть больше 0")
 	}
 
+	if envKey := os.Getenv("KEY"); envKey != "" {
+		k = envKey
+	}
+
 	flagRunAddr = fmt.Sprintf("http://%s", a)
 	reportInterval = time.Duration(r) * time.Second
 	pollInterval = time.Duration(p) * time.Second
+	key = k
 	return nil
 }
 
@@ -150,6 +158,12 @@ func sendMetricsBatch(metrics []models.Metrics) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Accept-Encoding", "gzip")
+
+	// Добавляем хеш если ключ задан
+	if key != "" {
+		hash := utils.CalculateHash(body, key)
+		req.Header.Set("HashSHA256", hash)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

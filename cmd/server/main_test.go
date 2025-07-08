@@ -25,7 +25,7 @@ import (
 
 func TestServer_JSON_API(t *testing.T) {
 	testStorage := storage.NewMemStorage()
-	handlers := server.NewHandlers(testStorage)
+	handlers := server.NewHandlers(testStorage, "")
 
 	r := chi.NewRouter()
 	r.Post("/update/", handlers.UpdateJSONHandler)
@@ -124,7 +124,7 @@ func TestServer_JSON_API(t *testing.T) {
 
 func TestGzipCompression(t *testing.T) {
 	testStorage := storage.NewMemStorage()
-	handlers := server.NewHandlers(testStorage)
+	handlers := server.NewHandlers(testStorage, "")
 
 	r := chi.NewRouter()
 	r.Use(middleware.GzipMiddleware)
@@ -351,7 +351,7 @@ func TestServer_FileStorage_ConcurrentAccess(t *testing.T) {
 
 func TestServer_PingHandler(t *testing.T) {
 	testStorage := storage.NewMemStorage()
-	handlers := server.NewHandlers(testStorage)
+	handlers := server.NewHandlers(testStorage, "")
 
 	r := chi.NewRouter()
 	r.Get("/ping", handlers.PingHandler)

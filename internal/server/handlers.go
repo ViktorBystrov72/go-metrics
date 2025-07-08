@@ -1,32 +1,71 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
 
 	"github.com/ViktorBystrov72/go-metrics/internal/models"
 	"github.com/ViktorBystrov72/go-metrics/internal/storage"
-	"github.com/go-chi/chi/v5"
+	"github.com/ViktorBystrov72/go-metrics/internal/utils"
 )
 
 // Handlers содержит HTTP обработчики
 type Handlers struct {
 	storage storage.Storage
+	key     string
 }
 
 // NewHandlers создает новые обработчики
-func NewHandlers(storage storage.Storage) *Handlers {
+func NewHandlers(storage storage.Storage, key string) *Handlers {
 	return &Handlers{
 		storage: storage,
+		key:     key,
 	}
+}
+
+// addHashToResponse добавляет хеш в заголовки ответа
+func (h *Handlers) addHashToResponse(w http.ResponseWriter, data []byte) {
+	if h.key != "" {
+		hash := utils.CalculateHash(data, h.key)
+		w.Header().Set("HashSHA256", hash)
+	}
+}
+
+// checkHash проверяет хеш запроса
+func (h *Handlers) checkHash(r *http.Request) bool {
+	if h.key == "" {
+		return true // если ключ не задан, считаем что проверка прошла
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return false
+	}
+
+	// Восстанавливаем тело запроса для дальнейшего использования
+	r.Body = io.NopCloser(bytes.NewReader(body))
+
+	receivedHash := r.Header.Get("HashSHA256")
+	if receivedHash == "" {
+		return false
+	}
+
+	return utils.VerifyHash(body, h.key, receivedHash)
 }
 
 // UpdateHandler обрабатывает POST запросы для обновления метрик
 func (h *Handlers) UpdateHandler(w http.ResponseWriter, r *http.Request) {
+	if !h.checkHash(r) {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
 	metricType := chi.URLParam(r, "type")
 	name := chi.URLParam(r, "name")
 	value := chi.URLParam(r, "value")
@@ -176,6 +215,12 @@ func (h *Handlers) UpdateJSONHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
+
+	if !h.checkHash(r) {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
 	var m models.Metrics
 	if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -211,8 +256,18 @@ func (h *Handlers) UpdateJSONHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
+
+	responseData, err := json.Marshal(resp)
+	if err != nil {
 		log.Printf("Ошибка при кодировании JSON ответа в UpdateJSONHandler: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	h.addHashToResponse(w, responseData)
+
+	if _, err := w.Write(responseData); err != nil {
+		log.Printf("Ошибка при записи ответа в UpdateJSONHandler: %v", err)
 	}
 }
 
@@ -251,8 +306,18 @@ func (h *Handlers) ValueJSONHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
+
+	responseData, err := json.Marshal(resp)
+	if err != nil {
 		log.Printf("Ошибка при кодировании JSON ответа в ValueJSONHandler: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	h.addHashToResponse(w, responseData)
+
+	if _, err := w.Write(responseData); err != nil {
+		log.Printf("Ошибка при записи ответа в ValueJSONHandler: %v", err)
 	}
 }
 
@@ -272,6 +337,11 @@ func (h *Handlers) PingHandler(w http.ResponseWriter, r *http.Request) {
 // UpdatesHandler обрабатывает POST запросы для обновления множества метрик в JSON формате
 func (h *Handlers) UpdatesHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Content-Type") != "application/json" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	if !h.checkHash(r) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}

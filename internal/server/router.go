@@ -17,8 +17,8 @@ type Router struct {
 }
 
 // NewRouter создает новый роутер
-func NewRouter(storage storage.Storage) *Router {
-	handlers := NewHandlers(storage)
+func NewRouter(storage storage.Storage, key string) *Router {
+	handlers := NewHandlers(storage, key)
 	router := chi.NewRouter()
 
 	// Middleware
