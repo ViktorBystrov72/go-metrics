@@ -110,18 +110,30 @@ func collectMetrics() []models.Metrics {
 	}
 	for name, value := range gaugeMetrics {
 		v := value
-		metrics = append(metrics, models.Metrics{
+		metric := models.Metrics{
 			ID:    name,
 			MType: "gauge",
 			Value: &v,
-		})
+		}
+		// Добавляем хеш к метрике если ключ задан
+		if key != "" {
+			data := fmt.Sprintf("%s:%s:%f", metric.ID, metric.MType, *metric.Value)
+			metric.Hash = utils.CalculateHash([]byte(data), key)
+		}
+		metrics = append(metrics, metric)
 	}
 	rv := rand.Float64()
-	metrics = append(metrics, models.Metrics{
+	metric := models.Metrics{
 		ID:    "RandomValue",
 		MType: "gauge",
 		Value: &rv,
-	})
+	}
+	// Добавляем хеш к метрике если ключ задан
+	if key != "" {
+		data := fmt.Sprintf("%s:%s:%f", metric.ID, metric.MType, *metric.Value)
+		metric.Hash = utils.CalculateHash([]byte(data), key)
+	}
+	metrics = append(metrics, metric)
 	return metrics
 }
 
@@ -158,12 +170,6 @@ func sendMetricsBatch(metrics []models.Metrics) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Accept-Encoding", "gzip")
-
-	// Добавляем хеш если ключ задан
-	if key != "" {
-		hash := utils.CalculateHash(body, key)
-		req.Header.Set("HashSHA256", hash)
-	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -202,11 +208,17 @@ func main() {
 			}
 			pollCount++
 			pc := pollCount
-			metricsMap["PollCount"] = models.Metrics{
+			metric := models.Metrics{
 				ID:    "PollCount",
 				MType: "counter",
 				Delta: &pc,
 			}
+			// Добавляем хеш к метрике если ключ задан
+			if key != "" {
+				data := fmt.Sprintf("%s:%s:%d", metric.ID, metric.MType, *metric.Delta)
+				metric.Hash = utils.CalculateHash([]byte(data), key)
+			}
+			metricsMap["PollCount"] = metric
 		case <-reportTicker.C:
 			var metricsToSend []models.Metrics
 			for _, metric := range metricsMap {

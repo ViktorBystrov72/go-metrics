@@ -38,12 +38,41 @@ func (h *Handlers) addHashToResponse(w http.ResponseWriter, data []byte) {
 	}
 }
 
+// addHashToMetrics добавляет хеш к метрике
+func (h *Handlers) addHashToMetrics(m *models.Metrics) {
+	if h.key == "" {
+		return
+	}
+
+	var data string
+	switch m.MType {
+	case "counter":
+		if m.Delta != nil {
+			data = fmt.Sprintf("%s:%s:%d", m.ID, m.MType, *m.Delta)
+		}
+	case "gauge":
+		if m.Value != nil {
+			data = fmt.Sprintf("%s:%s:%f", m.ID, m.MType, *m.Value)
+		}
+	}
+
+	if data != "" {
+		m.Hash = utils.CalculateHash([]byte(data), h.key)
+	}
+}
+
 // checkHash проверяет хеш запроса
 func (h *Handlers) checkHash(r *http.Request) bool {
 	if h.key == "" {
 		return true // если ключ не задан, проверка не требуется
 	}
 
+	// Для JSON запросов проверяем хеш из тела запроса
+	if r.Header.Get("Content-Type") == "application/json" {
+		return h.checkJSONHash(r)
+	}
+
+	// Для обычных запросов проверяем хеш из заголовков
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		return false
@@ -62,6 +91,107 @@ func (h *Handlers) checkHash(r *http.Request) bool {
 	}
 
 	return utils.VerifyHash(body, h.key, receivedHash)
+}
+
+// checkJSONHash проверяет хеш для JSON запросов
+func (h *Handlers) checkJSONHash(r *http.Request) bool {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return false
+	}
+
+	// Восстанавливаем тело запроса для дальнейшего использования
+	r.Body = io.NopCloser(bytes.NewReader(body))
+
+	headerHash := r.Header.Get("HashSHA256")
+	if headerHash == "" {
+		headerHash = r.Header.Get("Hash")
+	}
+	if headerHash == "none" {
+		return false // специальное значение означает отсутствие хеша
+	}
+
+	// Парсим JSON чтобы получить хеш
+	var m models.Metrics
+	if err := json.Unmarshal(body, &m); err != nil {
+		return false
+	}
+
+	// Если хеш не передан ни в заголовке, ни в теле, это ошибка (когда ключ задан)
+	if m.Hash == "" && headerHash == "" {
+		return false
+	}
+
+	// Если хеш пришел в заголовке, проверяем его от всего JSON тела
+	if headerHash != "" {
+		return utils.VerifyHash(body, h.key, headerHash)
+	}
+
+	// Если хеш пришел в JSON теле, проверяем его от строки name:type:value
+	if m.Hash != "" {
+		// Вычисляем ожидаемый хеш
+		var data string
+		switch m.MType {
+		case "counter":
+			if m.Delta == nil {
+				return false
+			}
+			data = fmt.Sprintf("%s:%s:%d", m.ID, m.MType, *m.Delta)
+		case "gauge":
+			if m.Value == nil {
+				return false
+			}
+			data = fmt.Sprintf("%s:%s:%f", m.ID, m.MType, *m.Value)
+		default:
+			return false
+		}
+
+		return utils.VerifyHash([]byte(data), h.key, m.Hash)
+	}
+
+	return false
+}
+
+// verifyMetricHash проверяет хеш отдельной метрики
+func (h *Handlers) verifyMetricHash(m models.Metrics) bool {
+	// Если ключ не задан, проверка не требуется
+	if h.key == "" {
+		return true
+	}
+
+	// Если хеш не передан, это ошибка
+	if m.Hash == "" {
+		log.Printf("No hash provided for metric: %s, type: %s", m.ID, m.MType)
+		return false
+	}
+
+	// Вычисляем ожидаемый хеш
+	var data string
+	switch m.MType {
+	case "counter":
+		if m.Delta == nil {
+			log.Printf("Counter metric %s has nil delta", m.ID)
+			return false
+		}
+		data = fmt.Sprintf("%s:%s:%d", m.ID, m.MType, *m.Delta)
+	case "gauge":
+		if m.Value == nil {
+			log.Printf("Gauge metric %s has nil value", m.ID)
+			return false
+		}
+		data = fmt.Sprintf("%s:%s:%f", m.ID, m.MType, *m.Value)
+	default:
+		log.Printf("Unknown metric type: %s for metric %s", m.MType, m.ID)
+		return false
+	}
+
+	expectedHash := utils.CalculateHash([]byte(data), h.key)
+	if m.Hash != expectedHash {
+		log.Printf("Hash mismatch for metric %s: expected %s, got %s", m.ID, expectedHash, m.Hash)
+		return false
+	}
+
+	return true
 }
 
 // UpdateHandler обрабатывает POST запросы для обновления метрик
@@ -261,6 +391,10 @@ func (h *Handlers) UpdateJSONHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
+
+	// Добавляем хеш к ответу
+	h.addHashToMetrics(&resp)
+
 	w.WriteHeader(http.StatusOK)
 
 	responseData, err := json.Marshal(resp)
@@ -269,8 +403,6 @@ func (h *Handlers) UpdateJSONHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-
-	h.addHashToResponse(w, responseData)
 
 	if _, err := w.Write(responseData); err != nil {
 		log.Printf("Ошибка при записи ответа в UpdateJSONHandler: %v", err)
@@ -318,6 +450,10 @@ func (h *Handlers) ValueJSONHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
+
+	// Добавляем хеш к ответу
+	h.addHashToMetrics(&resp)
+
 	w.WriteHeader(http.StatusOK)
 
 	responseData, err := json.Marshal(resp)
@@ -326,8 +462,6 @@ func (h *Handlers) ValueJSONHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-
-	h.addHashToResponse(w, responseData)
 
 	if _, err := w.Write(responseData); err != nil {
 		log.Printf("Ошибка при записи ответа в ValueJSONHandler: %v", err)
@@ -356,10 +490,8 @@ func (h *Handlers) UpdatesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.checkHash(r) {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
+	// Для batch запросов не проверяем хеш, так как это массив метрик
+	// и каждая метрика может иметь свой хеш
 
 	var metrics []models.Metrics
 	if err := json.NewDecoder(r.Body).Decode(&metrics); err != nil {
@@ -372,6 +504,17 @@ func (h *Handlers) UpdatesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Проверяем хеш каждой метрики если ключ задан
+	if h.key != "" {
+		for i, metric := range metrics {
+			if !h.verifyMetricHash(metric) {
+				log.Printf("Hash verification failed for metric %d: %s, type: %s", i, metric.ID, metric.MType)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+		}
+	}
+
 	// Группируем метрики по ключу (name, type) для избежания дубликатов в одном батче
 	metricsMap := make(map[string]models.Metrics)
 	for _, metric := range metrics {
@@ -382,7 +525,6 @@ func (h *Handlers) UpdatesHandler(w http.ResponseWriter, r *http.Request) {
 				combinedDelta := *existing.Delta + *metric.Delta
 				metric.Delta = &combinedDelta
 			}
-			// Для gauge просто перезаписываем последнее значение
 		}
 		metricsMap[key] = metric
 	}
