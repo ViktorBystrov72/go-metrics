@@ -210,6 +210,9 @@ metricstest -test.v -test.run=^TestIteration11$ -agent-binary-path=cmd/agent/age
 #### Тесты итерации 12 (Batch API)
 metricstest -test.v -test.run=^TestIteration12$ -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=. -database-dsn="postgres://user:pass@localhost:5432/dbname?sslmode=disable"
 
+#### Тесты итерации 14 (HashKey)
+metricstest -test.v -test.run=^TestIteration14$ -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=. -key="invalidkey" -database-dsn="postgres://postgres:postgres@localhost:5432/praktikum?sslmode=disable"
+
 ### Тестирование retry логики:
 ```bash
 # Тест с недоступным сервером
