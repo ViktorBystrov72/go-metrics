@@ -54,7 +54,7 @@ func (h *Handlers) checkHash(r *http.Request) bool {
 
 	receivedHash := r.Header.Get("HashSHA256")
 	if receivedHash == "" {
-		return false
+		return false // если ключ задан, но хеш не передан - ошибка
 	}
 
 	return utils.VerifyHash(body, h.key, receivedHash)
@@ -278,6 +278,12 @@ func (h *Handlers) ValueJSONHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
+
+	if !h.checkHash(r) {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
 	var m models.Metrics
 	if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
 		w.WriteHeader(http.StatusBadRequest)

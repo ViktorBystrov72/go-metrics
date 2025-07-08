@@ -198,16 +198,16 @@ Content-Type: application/json
 go test ./...
 ```
 
-# Тесты итерации 7 (файловое хранилище)
+#### Тесты итерации 7 (файловое хранилище)
 metricstest -test.v -test.run=^TestIteration7$ -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=.
 
-# Тесты итерации 10 (PostgreSQL + fallback)
+#### Тесты итерации 10 (PostgreSQL + fallback)
 metricstest -test.v -test.run='^TestIteration10A$|^TestIteration10B$' -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=. -database-dsn="postgres://user:pass@localhost:5432/dbname?sslmode=disable"
 
-# Тесты итерации 11 (PostgreSQL)
+#### Тесты итерации 11 (PostgreSQL)
 metricstest -test.v -test.run=^TestIteration11$ -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=. -database-dsn="postgres://user:pass@localhost:5432/dbname?sslmode=disable"
 
-# Тесты итерации 12 (Batch API)
+#### Тесты итерации 12 (Batch API)
 metricstest -test.v -test.run=^TestIteration12$ -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=. -database-dsn="postgres://user:pass@localhost:5432/dbname?sslmode=disable"
 
 ### Тестирование retry логики:

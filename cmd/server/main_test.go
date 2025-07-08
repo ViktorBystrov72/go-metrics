@@ -18,6 +18,7 @@ import (
 	"github.com/ViktorBystrov72/go-metrics/internal/models"
 	"github.com/ViktorBystrov72/go-metrics/internal/server"
 	"github.com/ViktorBystrov72/go-metrics/internal/storage"
+	"github.com/ViktorBystrov72/go-metrics/internal/utils"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -414,5 +415,95 @@ func TestStorage_IsDatabase(t *testing.T) {
 	t.Run("memory_storage", func(t *testing.T) {
 		storage := storage.NewMemStorage()
 		assert.False(t, storage.IsDatabase())
+	})
+}
+
+func TestServer_HashVerification(t *testing.T) {
+	testStorage := storage.NewMemStorage()
+	handlers := server.NewHandlers(testStorage, "test-key")
+
+	r := chi.NewRouter()
+	r.Post("/update/", handlers.UpdateJSONHandler)
+	r.Post("/value/", handlers.ValueJSONHandler)
+
+	ts := httptest.NewServer(r)
+	defer ts.Close()
+
+	t.Run("valid hash", func(t *testing.T) {
+		val := 123.45
+		m := models.Metrics{ID: "testGauge", MType: "gauge", Value: &val}
+		body, _ := json.Marshal(m)
+
+		// Вычисляем правильный хеш
+		hash := utils.CalculateHash(body, "test-key")
+
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/update/", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("HashSHA256", hash)
+
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("invalid hash", func(t *testing.T) {
+		val := 123.45
+		m := models.Metrics{ID: "testGauge", MType: "gauge", Value: &val}
+		body, _ := json.Marshal(m)
+
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/update/", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("HashSHA256", "invalid-hash")
+
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+
+	t.Run("no hash when key is set", func(t *testing.T) {
+		val := 123.45
+		m := models.Metrics{ID: "testGauge", MType: "gauge", Value: &val}
+		body, _ := json.Marshal(m)
+
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/update/", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		// Не передаем хеш
+
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+}
+
+func TestServer_NoHashVerification(t *testing.T) {
+	testStorage := storage.NewMemStorage()
+	handlers := server.NewHandlers(testStorage, "") // Пустой ключ
+
+	r := chi.NewRouter()
+	r.Post("/update/", handlers.UpdateJSONHandler)
+
+	ts := httptest.NewServer(r)
+	defer ts.Close()
+
+	t.Run("no key - no hash verification", func(t *testing.T) {
+		val := 123.45
+		m := models.Metrics{ID: "testGauge", MType: "gauge", Value: &val}
+		body, _ := json.Marshal(m)
+
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/update/", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		// Не передаем хеш, но это должно работать
+
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	})
 }
