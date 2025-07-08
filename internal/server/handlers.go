@@ -212,6 +212,8 @@ func (h *Handlers) IndexHandler(w http.ResponseWriter, r *http.Request) {
 
 // UpdateJSONHandler обрабатывает POST запросы для обновления метрик в JSON формате
 func (h *Handlers) UpdateJSONHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	
 	if r.Header.Get("Content-Type") != "application/json" {
 		w.WriteHeader(http.StatusBadRequest)
 		return
@@ -255,7 +257,6 @@ func (h *Handlers) UpdateJSONHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
 	responseData, err := json.Marshal(resp)
@@ -274,6 +275,8 @@ func (h *Handlers) UpdateJSONHandler(w http.ResponseWriter, r *http.Request) {
 
 // ValueJSONHandler обрабатывает POST запросы для получения значений метрик в JSON формате
 func (h *Handlers) ValueJSONHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
 	if r.Header.Get("Content-Type") != "application/json" {
 		w.WriteHeader(http.StatusBadRequest)
 		return
@@ -311,7 +314,6 @@ func (h *Handlers) ValueJSONHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
 	responseData, err := json.Marshal(resp)
@@ -343,6 +345,8 @@ func (h *Handlers) PingHandler(w http.ResponseWriter, r *http.Request) {
 
 // UpdatesHandler обрабатывает POST запросы для обновления множества метрик в JSON формате
 func (h *Handlers) UpdatesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	
 	if r.Header.Get("Content-Type") != "application/json" {
 		w.WriteHeader(http.StatusBadRequest)
 		return
