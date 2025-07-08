@@ -40,8 +40,8 @@ func (h *Handlers) addHashToResponse(w http.ResponseWriter, data []byte) {
 
 // checkHash проверяет хеш запроса
 func (h *Handlers) checkHash(r *http.Request) bool {
-	if h.key == "" || h.key == "invalidkey" {
-		return true // если ключ не задан или равен "invalidkey", считаем что проверка прошла
+	if h.key == "" {
+		return true // если ключ не задан, проверка не требуется
 	}
 
 	body, err := io.ReadAll(r.Body)
@@ -163,7 +163,7 @@ func (h *Handlers) IndexHandler(w http.ResponseWriter, r *http.Request) {
 </head>
 <body>
     <h1>Метрики системы</h1>
-    
+
     <div class="metric-section">
         <h2>Gauge метрики</h2>
         {{range $name, $value := .Gauges}}
@@ -174,7 +174,7 @@ func (h *Handlers) IndexHandler(w http.ResponseWriter, r *http.Request) {
         <div class="metric-item">Нет gauge метрик</div>
         {{end}}
     </div>
-    
+
     <div class="metric-section">
         <h2>Counter метрики</h2>
         {{range $name, $value := .Counters}}
@@ -213,7 +213,7 @@ func (h *Handlers) IndexHandler(w http.ResponseWriter, r *http.Request) {
 // UpdateJSONHandler обрабатывает POST запросы для обновления метрик в JSON формате
 func (h *Handlers) UpdateJSONHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	if r.Header.Get("Content-Type") != "application/json" {
 		w.WriteHeader(http.StatusBadRequest)
 		return
@@ -346,7 +346,7 @@ func (h *Handlers) PingHandler(w http.ResponseWriter, r *http.Request) {
 // UpdatesHandler обрабатывает POST запросы для обновления множества метрик в JSON формате
 func (h *Handlers) UpdatesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	if r.Header.Get("Content-Type") != "application/json" {
 		w.WriteHeader(http.StatusBadRequest)
 		return
