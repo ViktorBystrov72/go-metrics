@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"compress/gzip"
 
 	"github.com/ViktorBystrov72/go-metrics/internal/models"
+	"github.com/ViktorBystrov72/go-metrics/internal/utils"
 )
 
 var (
@@ -115,12 +117,18 @@ func collectMetrics() []models.Metrics {
 	return metrics
 }
 
-func sendMetric(metric models.Metrics) error {
-	url, err := url.JoinPath(flagRunAddr, "update/")
+// sendMetricsBatch отправляет множество метрик одним запросом
+func sendMetricsBatch(metrics []models.Metrics) error {
+	if len(metrics) == 0 {
+		return nil // Не отправляем пустые батчи
+	}
+
+	url, err := url.JoinPath(flagRunAddr, "updates/")
 	if err != nil {
 		return fmt.Errorf("error joining URL: %w", err)
 	}
-	body, err := json.Marshal(metric)
+
+	body, err := json.Marshal(metrics)
 	if err != nil {
 		return fmt.Errorf("marshal error: %w", err)
 	}
@@ -142,16 +150,23 @@ func sendMetric(metric models.Metrics) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Accept-Encoding", "gzip")
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("error sending request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-	return nil
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	return utils.Retry(ctx, utils.DefaultRetryConfig(), func() error {
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("error sending batch request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+		return nil
+	})
 }
 
 func main() {
@@ -179,11 +194,16 @@ func main() {
 				Delta: &pc,
 			}
 		case <-reportTicker.C:
+			var metricsToSend []models.Metrics
 			for _, metric := range metricsMap {
-				if err := sendMetric(metric); err != nil {
-					log.Printf("Error sending metric %s: %v", metric.ID, err)
-				}
+				metricsToSend = append(metricsToSend, metric)
 			}
+
+			// Отправляем все метрики одним batch запросом
+			if err := sendMetricsBatch(metricsToSend); err != nil {
+				log.Printf("Error sending metrics batch: %v", err)
+			}
+
 			metricsMap = make(map[string]models.Metrics)
 			pollCount = 0
 		}

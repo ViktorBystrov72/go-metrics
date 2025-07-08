@@ -1,32 +1,269 @@
-# go-musthave-metrics-tpl
+# Сервис сбора метрик
 
-Шаблон репозитория для трека «Сервер сбора метрик и алертинга».
+Сервис для сбора и хранения метрик с поддержкой PostgreSQL и retry логики для обработки временных ошибок.
 
-## Начало работы
+## Возможности
 
-1. Склонируйте репозиторий в любую подходящую директорию на вашем компьютере.
-2. В корне репозитория выполните команду `go mod init <name>` (где `<name>` — адрес вашего репозитория на GitHub без префикса `https://`) для создания модуля.
+- Сбор метрик типа gauge и counter
+- Хранение в памяти, файле или PostgreSQL
+- Batch API для обновления множества метрик
+- Gzip сжатие для HTTP запросов
+- Retry логика для обработки временных ошибок**
+- Автоматический fallback между типами хранилищ
 
-## Обновление шаблона
+## Retry логика
 
-Чтобы иметь возможность получать обновления автотестов и других частей шаблона, выполните команду:
+Сервис включает в себя интеллектуальную retry логику для обработки временных ошибок:
 
+### Поддерживаемые retriable ошибки:
+- **Сетевые ошибки**: connection refused, connection reset, broken pipe
+- **PostgreSQL ошибки класса 08**: Connection Exception
+- **DNS ошибки**: временные ошибки разрешения имен
+- **Таймауты**: сетевые и HTTP таймауты
+- **Перегрузка сервера**: too many connections, server overloaded
+
+### Настройки retry:
+- **Количество попыток**: 4 (1 основная + 3 повтора)
+- **Интервалы**: 1s, 3s, 5s между попытками
+- **Таймауты**: 10s для HTTP запросов, 30s общий таймаут
+
+### Применение:
+- **Агент**: retry при отправке метрик на сервер
+- **Сервер**: retry при работе с PostgreSQL
+- **Batch операции**: retry для batch обновлений
+
+## Архитектура
+
+### Компоненты
+
+1. **Agent** (`cmd/agent/`) - собирает метрики и отправляет на сервер
+2. **Server** (`cmd/server/`) - принимает и хранит метрики
+3. **Storage** (`internal/storage/`) - интерфейсы и реализации хранилищ
+4. **Utils** (`internal/utils/`) - утилиты, включая retry логику
+
+### Типы хранилищ
+
+1. **MemoryStorage** - хранение в памяти (по умолчанию)
+2. **FileStorage** - хранение в JSON файле
+3. **DatabaseStorage** - хранение в PostgreSQL с retry логикой и pgxpool
+
+### Технологии
+
+- **PostgreSQL** - используется pgxpool для эффективного пула соединений
+- **Retry логика** - автоматические повторы при временных ошибках
+- **Gzip сжатие** - для HTTP запросов
+- **Batch API** - для массового обновления метрик
+
+## Установка и запуск
+
+### Требования
+- Go 1.21+
+- PostgreSQL (опционально)
+
+### Запуск PostgreSQL через Docker Compose
+
+```bash
+docker compose up -d
 ```
-git remote add -m main template https://github.com/Yandex-Practicum/go-musthave-metrics-tpl.git
+
+Проверка, что база данных запущена:
+
+```bash
+docker compose ps
 ```
 
-Для обновления кода автотестов выполните команду:
+Подключитесь к базе данных (опционально):
 
+```bash
+docker compose exec postgres psql -U postgres -d praktikum
 ```
-git fetch template && git checkout template/main .github
+
+### Сборка
+```bash
+go build -o bin/agent cmd/agent/main.go
+go build -o bin/server cmd/server/main.go
+go build -o bin/migrate cmd/migrate/main.go
 ```
 
-Затем добавьте полученные изменения в свой репозиторий.
+### Запуск сервера
 
-## Запуск автотестов
+#### С PostgreSQL:
+```bash
+DATABASE_DSN='postgres://postgres:postgres@localhost:5432/praktikum?sslmode=disable' ./bin/server
+```
 
-Для успешного запуска автотестов называйте ветки `iter<number>`, где `<number>` — порядковый номер инкремента. Например, в ветке с названием `iter4` запустятся автотесты для инкрементов с первого по четвёртый.
+#### С файловым хранилищем:
+```bash
+./bin/server
+```
 
-При мёрже ветки с инкрементом в основную ветку `main` будут запускаться все автотесты.
+### Запуск агента:
+```bash
+./bin/agent
+```
 
-Подробнее про локальный и автоматический запуск читайте в [README автотестов](https://github.com/Yandex-Practicum/go-autotests).
+## API
+
+### Обновление метрики
+```http
+POST /update/{type}/{name}/{value}
+```
+
+### Batch обновление метрик
+```http
+POST /updates/
+Content-Type: application/json
+Content-Encoding: gzip
+
+[
+  {
+    "id": "metric1",
+    "type": "gauge",
+    "value": 123.45
+  },
+  {
+    "id": "metric2", 
+    "type": "counter",
+    "delta": 10
+  }
+]
+```
+
+### Получение значения метрики
+```http
+POST /value/
+Content-Type: application/json
+
+{
+  "id": "metric1",
+  "type": "gauge"
+}
+```
+
+## Конфигурация
+
+### Переменные окружения агента:
+- `ADDRESS` - адрес сервера (по умолчанию: localhost:8080)
+- `REPORT_INTERVAL` - интервал отправки метрик (по умолчанию: 10s)
+- `POLL_INTERVAL` - интервал сбора метрик (по умолчанию: 2s)
+
+### Переменные окружения сервера:
+- `ADDRESS` - адрес для прослушивания (по умолчанию: localhost:8080)
+- `DATABASE_DSN` - строка подключения к PostgreSQL
+- `FILE_STORAGE_PATH` - путь к файлу для хранения метрик
+- `RESTORE` - восстанавливать метрики из файла (по умолчанию: true)
+
+## Логика выбора хранилища
+
+1. Если указан `DATABASE_DSN` → PostgreSQL с retry логикой
+2. Если указан `FILE_STORAGE_PATH` → файловое хранилище
+3. Иначе → хранение в памяти
+
+## Тестирование
+
+### Запуск тестов:
+```bash
+go test ./...
+```
+
+# Тесты итерации 7 (файловое хранилище)
+metricstest -test.v -test.run=^TestIteration7$ -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=.
+
+# Тесты итерации 10 (PostgreSQL + fallback)
+metricstest -test.v -test.run='^TestIteration10A$|^TestIteration10B$' -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=. -database-dsn="postgres://user:pass@localhost:5432/dbname?sslmode=disable"
+
+# Тесты итерации 11 (PostgreSQL)
+metricstest -test.v -test.run=^TestIteration11$ -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=. -database-dsn="postgres://user:pass@localhost:5432/dbname?sslmode=disable"
+
+# Тесты итерации 12 (Batch API)
+metricstest -test.v -test.run=^TestIteration12$ -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=. -database-dsn="postgres://user:pass@localhost:5432/dbname?sslmode=disable"
+
+### Тестирование retry логики:
+```bash
+# Тест с недоступным сервером
+./bin/agent  # Агент будет retry отправку метрик
+
+# Тест с недоступной PostgreSQL
+DATABASE_DSN='postgres://invalid:invalid@localhost:5432/invalid' ./bin/server
+```
+
+### Бенчмарки:
+```bash
+go test -bench=. ./internal/storage/
+```
+
+## Примеры использования
+
+### Отправка метрики с retry:
+```bash
+curl -X POST "http://localhost:8080/update/gauge/test/123.45"
+```
+
+### Batch отправка с gzip:
+```bash
+echo '[{"id":"test","type":"gauge","value":123.45}]' | gzip | \
+curl -X POST "http://localhost:8080/updates/" \
+  -H "Content-Type: application/json" \
+  -H "Content-Encoding: gzip" \
+  --data-binary @-
+```
+
+## Агент
+
+Агент автоматически собирает метрики runtime и отправляет их на сервер:
+
+- **Batch отправка** - агент отправляет все метрики одним запросом через `/updates/`
+- **Gzip сжатие** - все запросы сжимаются
+- **Retry логика** - автоматические повторы при временных ошибках
+- **Настраиваемые интервалы** - можно настроить частоту сбора и отправки метрик
+
+### Параметры агента
+
+- `-a` - адрес сервера (по умолчанию: localhost:8080)
+- `-r` - интервал отправки в секундах (по умолчанию: 10)
+- `-p` - интервал сбора в секундах (по умолчанию: 2)
+
+### Переменные окружения агента
+
+- `ADDRESS` - адрес сервера
+- `REPORT_INTERVAL` - интервал отправки в секундах
+- `POLL_INTERVAL` - интервал сбора в секундах
+
+## База данных
+
+### Миграции
+
+Сервис использует [goose](https://github.com/pressly/goose) для управления миграциями базы данных:
+
+```bash
+# Применить миграции
+./bin/migrate -dsn="postgres://user:pass@localhost:5432/dbname?sslmode=disable" -command=up
+
+# Проверить статус миграций
+./bin/migrate -dsn="postgres://user:pass@localhost:5432/dbname?sslmode=disable" -command=status
+```
+
+### Структура базы данных
+
+Миграции автоматически создают таблицу `metrics` со следующей структурой:
+
+```sql
+CREATE TABLE metrics (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    type VARCHAR(50) NOT NULL,
+    value DOUBLE PRECISION,
+    delta BIGINT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(name, type)
+);
+
+CREATE INDEX idx_metrics_name_type ON metrics(name, type);
+CREATE INDEX idx_metrics_created_at ON metrics(created_at);
+```
+
+**Особенности PostgreSQL хранилища:**
+- Автоматическое применение миграций при запуске
+- Используется pgxpool для эффективного пула соединений
+- Метрики сохраняются сразу при обновлении
+- Поддержка уникальных ограничений для предотвращения дублирования

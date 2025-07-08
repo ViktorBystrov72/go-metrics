@@ -16,17 +16,42 @@ func main() {
 		log.Fatal(err)
 	}
 
-	storage := storage.NewMemStorage()
+	var storageInstance storage.Storage
+
+	// Приоритет хранилищ: PostgreSQL -> файл -> память
+	if cfg.DatabaseDSN != "" {
+		dbStorage, err := storage.NewDatabaseStorage(cfg.DatabaseDSN)
+		if err != nil {
+			log.Fatalf("Failed to connect to database: %v", err)
+		}
+		defer dbStorage.Close()
+		storageInstance = dbStorage
+		log.Printf("Using PostgreSQL storage")
+	} else if cfg.FileStoragePath != "" {
+		fileStorage := storage.NewMemStorage()
+		if cfg.Restore {
+			if err := fileStorage.LoadFromFile(cfg.FileStoragePath); err != nil {
+				log.Printf("Failed to load from file: %v", err)
+			} else {
+				log.Printf("Loaded metrics from file: %s", cfg.FileStoragePath)
+			}
+		}
+		storageInstance = fileStorage
+		log.Printf("Using file storage: %s", cfg.FileStoragePath)
+	} else {
+		storageInstance = storage.NewMemStorage()
+		log.Printf("Using in-memory storage")
+	}
 
 	storageConfig := &server.Config{
 		StoreInterval:   cfg.StoreInterval,
 		FileStoragePath: cfg.FileStoragePath,
 		Restore:         cfg.Restore,
 	}
-	storageManager := server.NewStorageManager(storage, storageConfig)
+	storageManager := server.NewStorageManager(storageInstance, storageConfig)
 	storageManager.Start()
 
-	router := server.NewRouter(storage)
+	router := server.NewRouter(storageInstance)
 
 	zapLogger, err := zap.NewProduction()
 	if err != nil {

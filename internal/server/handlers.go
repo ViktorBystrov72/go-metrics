@@ -78,8 +78,8 @@ func (h *Handlers) ValueHandler(w http.ResponseWriter, r *http.Request) {
 
 	switch metricType {
 	case string(storage.Gauge):
-		value, exists := h.storage.GetGauge(name)
-		if !exists {
+		value, err := h.storage.GetGauge(name)
+		if err != nil {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -88,8 +88,8 @@ func (h *Handlers) ValueHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Ошибка при записи ответа в ValueHandler (gauge): %v", err)
 		}
 	case string(storage.Counter):
-		value, exists := h.storage.GetCounter(name)
-		if !exists {
+		value, err := h.storage.GetCounter(name)
+		if err != nil {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -199,8 +199,8 @@ func (h *Handlers) UpdateJSONHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		h.storage.UpdateCounter(m.ID, *m.Delta)
 		// Получаем актуальное значение после обновления
-		v, ok := h.storage.GetCounter(m.ID)
-		if !ok {
+		v, err := h.storage.GetCounter(m.ID)
+		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -232,15 +232,15 @@ func (h *Handlers) ValueJSONHandler(w http.ResponseWriter, r *http.Request) {
 	resp.MType = m.MType
 	switch m.MType {
 	case "gauge":
-		v, ok := h.storage.GetGauge(m.ID)
-		if !ok {
+		v, err := h.storage.GetGauge(m.ID)
+		if err != nil {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 		resp.Value = &v
 	case "counter":
-		v, ok := h.storage.GetCounter(m.ID)
-		if !ok {
+		v, err := h.storage.GetCounter(m.ID)
+		if err != nil {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -254,4 +254,45 @@ func (h *Handlers) ValueJSONHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		log.Printf("Ошибка при кодировании JSON ответа в ValueJSONHandler: %v", err)
 	}
+}
+
+// PingHandler обрабатывает GET запросы для проверки соединения с базой данных
+func (h *Handlers) PingHandler(w http.ResponseWriter, r *http.Request) {
+	if !h.storage.IsAvailable() {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	if err := h.storage.Ping(); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// UpdatesHandler обрабатывает POST запросы для обновления множества метрик в JSON формате
+func (h *Handlers) UpdatesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Content-Type") != "application/json" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	var metrics []models.Metrics
+	if err := json.NewDecoder(r.Body).Decode(&metrics); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	if len(metrics) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	// Обновляем все метрики в батче одной операцией
+	if err := h.storage.UpdateBatch(metrics); err != nil {
+		log.Printf("Failed to update batch: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }

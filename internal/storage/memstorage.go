@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"sync"
+
+	"github.com/ViktorBystrov72/go-metrics/internal/models"
 )
 
 // MemStorage реализация хранилища в памяти
@@ -37,19 +39,29 @@ func (s *MemStorage) UpdateCounter(name string, value int64) {
 }
 
 // GetGauge возвращает значение gauge метрики
-func (s *MemStorage) GetGauge(name string) (float64, bool) {
+func (s *MemStorage) GetGauge(name string) (float64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	value, exists := s.gauges[name]
-	return value, exists
+	if !exists {
+		return 0, fmt.Errorf("gauge metric %s not found", name)
+	}
+
+	return value, nil
 }
 
 // GetCounter возвращает значение counter метрики
-func (s *MemStorage) GetCounter(name string) (int64, bool) {
+func (s *MemStorage) GetCounter(name string) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	value, exists := s.counters[name]
-	return value, exists
+	if !exists {
+		return 0, fmt.Errorf("counter metric %s not found", name)
+	}
+
+	return value, nil
 }
 
 // GetAllGauges возвращает все gauge метрики
@@ -132,5 +144,50 @@ func (s *MemStorage) LoadFromFile(filename string) error {
 		s.counters[k] = v
 	}
 	s.mu.Unlock()
+	return nil
+}
+
+// Ping проверяет соединение с хранилищем (для совместимости с интерфейсом)
+func (s *MemStorage) Ping() error {
+	// Для хранилища в памяти всегда возвращаем nil
+	return nil
+}
+
+// IsDatabase возвращает false, так как это не база данных
+func (s *MemStorage) IsDatabase() bool {
+	return false
+}
+
+// IsAvailable всегда true для памяти
+func (s *MemStorage) IsAvailable() bool {
+	return true
+}
+
+// UpdateBatch обновляет множество метрик в одной операции
+func (s *MemStorage) UpdateBatch(metrics []models.Metrics) error {
+	if len(metrics) == 0 {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, m := range metrics {
+		switch m.MType {
+		case "gauge":
+			if m.Value == nil {
+				return fmt.Errorf("gauge metric %s has nil value", m.ID)
+			}
+			s.gauges[m.ID] = *m.Value
+		case "counter":
+			if m.Delta == nil {
+				return fmt.Errorf("counter metric %s has nil delta", m.ID)
+			}
+			s.counters[m.ID] += *m.Delta
+		default:
+			return fmt.Errorf("unknown metric type: %s", m.MType)
+		}
+	}
+
 	return nil
 }
