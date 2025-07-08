@@ -13,6 +13,7 @@ import (
 	"github.com/ViktorBystrov72/go-metrics/internal/models"
 	"github.com/ViktorBystrov72/go-metrics/internal/storage"
 	"github.com/ViktorBystrov72/go-metrics/internal/utils"
+	"github.com/go-chi/chi/v5"
 )
 
 // Handlers содержит HTTP обработчики
