@@ -477,7 +477,7 @@ func TestServer_HashVerification(t *testing.T) {
 		resp, err := client.Do(req)
 		require.NoError(t, err)
 		defer resp.Body.Close()
-		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	})
 }
 

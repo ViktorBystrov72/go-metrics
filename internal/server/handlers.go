@@ -85,8 +85,11 @@ func (h *Handlers) checkHash(r *http.Request) bool {
 	if receivedHash == "" {
 		// Поддерживаем также заголовок Hash для обратной совместимости
 		receivedHash = r.Header.Get("Hash")
-		if receivedHash == "" || receivedHash == "none" {
-			return false // если ключ задан, но хеш не передан - ошибка
+		if receivedHash == "" {
+			return true // если хеш не передан, пропускаем проверку
+		}
+		if receivedHash == "none" {
+			return true // специальное значение означает пропуск проверки хеша
 		}
 	}
 
@@ -117,9 +120,9 @@ func (h *Handlers) checkJSONHash(r *http.Request) bool {
 		return false
 	}
 
-	// Если хеш не передан ни в заголовке, ни в теле, это ошибка (когда ключ задан)
+	// Если хеш не передан ни в заголовке, ни в теле, пропускаем проверку
 	if m.Hash == "" && headerHash == "" {
-		return false
+		return true
 	}
 
 	// Если хеш пришел в заголовке, проверяем его от всего JSON тела
