@@ -108,7 +108,7 @@ func (h *Handlers) checkJSONHash(r *http.Request) bool {
 		headerHash = r.Header.Get("Hash")
 	}
 	if headerHash == "none" {
-		return false // специальное значение означает отсутствие хеша
+		return true // специальное значение означает пропуск проверки хеша
 	}
 
 	// Парсим JSON чтобы получить хеш
