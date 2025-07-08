@@ -54,7 +54,11 @@ func (h *Handlers) checkHash(r *http.Request) bool {
 
 	receivedHash := r.Header.Get("HashSHA256")
 	if receivedHash == "" {
-		return false // если ключ задан, но хеш не передан - ошибка
+		// Поддерживаем также заголовок Hash для обратной совместимости
+		receivedHash = r.Header.Get("Hash")
+		if receivedHash == "" || receivedHash == "none" {
+			return false // если ключ задан, но хеш не передан - ошибка
+		}
 	}
 
 	return utils.VerifyHash(body, h.key, receivedHash)
@@ -368,8 +372,28 @@ func (h *Handlers) UpdatesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Группируем метрики по ключу (name, type) для избежания дубликатов в одном батче
+	metricsMap := make(map[string]models.Metrics)
+	for _, metric := range metrics {
+		key := metric.ID + "_" + metric.MType
+		if existing, exists := metricsMap[key]; exists {
+			// Если метрика уже есть, объединяем значения
+			if metric.MType == "counter" && metric.Delta != nil && existing.Delta != nil {
+				combinedDelta := *existing.Delta + *metric.Delta
+				metric.Delta = &combinedDelta
+			}
+			// Для gauge просто перезаписываем последнее значение
+		}
+		metricsMap[key] = metric
+	}
+
+	uniqueMetrics := make([]models.Metrics, 0, len(metricsMap))
+	for _, metric := range metricsMap {
+		uniqueMetrics = append(uniqueMetrics, metric)
+	}
+
 	// Обновляем все метрики в батче одной операцией
-	if err := h.storage.UpdateBatch(metrics); err != nil {
+	if err := h.storage.UpdateBatch(uniqueMetrics); err != nil {
 		log.Printf("Failed to update batch: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
