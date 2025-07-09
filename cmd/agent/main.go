@@ -292,62 +292,80 @@ func (mc *MetricsCollector) collectSystemMetricsData() []models.Metrics {
 	return metrics
 }
 
-// MetricsSender отправляет метрики на сервер
+type Task func()
+
+// WorkerPool управляет пулом воркеров для выполнения задач
+type WorkerPool struct {
+	tasks    chan Task
+	wg       sync.WaitGroup
+	poolSize int
+}
+
+func NewWorkerPool(poolSize int) *WorkerPool {
+	return &WorkerPool{
+		tasks:    make(chan Task, 100),
+		poolSize: poolSize,
+	}
+}
+
+func (wp *WorkerPool) Start(ctx context.Context) {
+	for i := 0; i < wp.poolSize; i++ {
+		wp.wg.Add(1)
+		go func() {
+			defer wp.wg.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case task := <-wp.tasks:
+					task()
+				}
+			}
+		}()
+	}
+}
+
+func (wp *WorkerPool) Submit(task Task) {
+	wp.tasks <- task
+}
+
+func (wp *WorkerPool) Stop() {
+	wp.wg.Wait()
+	close(wp.tasks)
+}
+
+// MetricsSender формирует задачи отправки и кладёт их в pool
 type MetricsSender struct {
 	metricsChan chan []models.Metrics
-	wg          sync.WaitGroup
-	semaphore   chan struct{} // Семафор для ограничения количества запросов
+	pool        *WorkerPool
 }
 
-// NewMetricsSender создает новый отправитель метрик
-func NewMetricsSender() *MetricsSender {
+func NewMetricsSender(poolSize int) *MetricsSender {
 	return &MetricsSender{
 		metricsChan: make(chan []models.Metrics, 100),
-		semaphore:   make(chan struct{}, rateLimit), // Worker pool с ограничением
+		pool:        NewWorkerPool(poolSize),
 	}
 }
 
-// Start запускает отправку метрик
 func (ms *MetricsSender) Start(ctx context.Context) {
-	// Запускаем worker pool
-	for i := 0; i < rateLimit; i++ {
-		ms.wg.Add(1)
-		go ms.worker(ctx)
-	}
+	ms.pool.Start(ctx)
+	go func() {
+		for metrics := range ms.metricsChan {
+			m := metrics
+			ms.pool.Submit(func() {
+				_ = ms.sendMetricsBatch(m)
+			})
+		}
+	}()
 }
 
-// Stop останавливает отправку метрик
 func (ms *MetricsSender) Stop() {
-	ms.wg.Wait()
+	ms.pool.Stop()
 	close(ms.metricsChan)
 }
 
-// Metrics возвращает канал для отправки метрик
 func (ms *MetricsSender) Metrics() chan<- []models.Metrics {
 	return ms.metricsChan
-}
-
-// worker - воркер для отправки метрик
-func (ms *MetricsSender) worker(ctx context.Context) {
-	defer ms.wg.Done()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case metrics := <-ms.metricsChan:
-			// Получаем слот в семафоре
-			ms.semaphore <- struct{}{}
-
-			// Отправляем метрики
-			if err := ms.sendMetricsBatch(metrics); err != nil {
-				log.Printf("Error sending metrics batch: %v", err)
-			}
-
-			// Освобождаем слот
-			<-ms.semaphore
-		}
-	}
 }
 
 var bufPool = sync.Pool{
@@ -429,7 +447,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var collector Collector = NewMetricsCollector()
-	var sender Sender = NewMetricsSender()
+	var sender Sender = NewMetricsSender(rateLimit)
 
 	collector.Start(ctx)
 	sender.Start(ctx)
