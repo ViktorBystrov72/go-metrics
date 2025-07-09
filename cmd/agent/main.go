@@ -350,6 +350,18 @@ func (ms *MetricsSender) worker(ctx context.Context) {
 	}
 }
 
+var bufPool = sync.Pool{
+	New: func() interface{} {
+		return new(bytes.Buffer)
+	},
+}
+
+var gzipPool = sync.Pool{
+	New: func() interface{} {
+		return gzip.NewWriter(nil)
+	},
+}
+
 // sendMetricsBatch отправляет множество метрик одним запросом
 func (ms *MetricsSender) sendMetricsBatch(metrics []models.Metrics) error {
 	if len(metrics) == 0 {
@@ -366,8 +378,14 @@ func (ms *MetricsSender) sendMetricsBatch(metrics []models.Metrics) error {
 		return fmt.Errorf("marshal error: %w", err)
 	}
 
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
+	buf := bufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bufPool.Put(buf)
+
+	gz := gzipPool.Get().(*gzip.Writer)
+	gz.Reset(buf)
+	defer gzipPool.Put(gz)
+
 	_, err = gz.Write(body)
 	if err != nil {
 		return fmt.Errorf("gzip write error: %w", err)
@@ -376,7 +394,7 @@ func (ms *MetricsSender) sendMetricsBatch(metrics []models.Metrics) error {
 		return fmt.Errorf("gzip close error: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, url, &buf)
+	req, err := http.NewRequest(http.MethodPost, url, buf)
 	if err != nil {
 		return fmt.Errorf("error creating request: %w", err)
 	}
