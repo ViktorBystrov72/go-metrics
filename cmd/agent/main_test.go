@@ -1,19 +1,22 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/ViktorBystrov72/go-metrics/internal/app"
 	"github.com/ViktorBystrov72/go-metrics/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestCollectRuntimeMetricsData(t *testing.T) {
-	collector := NewMetricsCollector()
-	metrics := collector.collectRuntimeMetricsData()
+	cfg := &app.AgentConfig{PollInterval: 2, Key: ""}
+	collector := app.NewMetricsCollector(cfg)
+	metrics := collector.(*app.MetricsCollector).CollectRuntimeMetricsData()
 
 	metricNames := make(map[string]bool)
 	for _, m := range metrics {
@@ -39,8 +42,9 @@ func TestCollectRuntimeMetricsData(t *testing.T) {
 }
 
 func TestCollectSystemMetricsData(t *testing.T) {
-	collector := NewMetricsCollector()
-	metrics := collector.collectSystemMetricsData()
+	cfg := &app.AgentConfig{PollInterval: 2, Key: ""}
+	collector := app.NewMetricsCollector(cfg)
+	metrics := collector.(*app.MetricsCollector).CollectSystemMetricsData()
 
 	metricNames := make(map[string]bool)
 	for _, m := range metrics {
@@ -74,9 +78,8 @@ func TestSendMetricsBatch(t *testing.T) {
 	}))
 	defer server.Close()
 
-	flagRunAddr = server.URL
-
-	sender := NewMetricsSender()
+	cfg := &app.AgentConfig{Address: server.URL[7:], Key: ""} // убираем "http://"
+	sender := app.NewMetricsSender(cfg)
 	val1 := 123.45
 	val2 := 67.89
 	metrics := []models.Metrics{
@@ -92,20 +95,20 @@ func TestSendMetricsBatch(t *testing.T) {
 		},
 	}
 
-	err := sender.sendMetricsBatch(metrics)
+	err := sender.(*app.MetricsSender).SendMetricsBatch(metrics)
 	require.NoError(t, err)
 }
 
 func TestMetricsCollector(t *testing.T) {
-	pollInterval = 1 * time.Second
-	reportInterval = 2 * time.Second
+	cfg := &app.AgentConfig{PollInterval: 1, Key: ""}
+	collector := app.NewMetricsCollector(cfg)
 
-	collector := NewMetricsCollector()
-
-	collector.Start()
+	ctx, cancel := context.WithCancel(context.Background())
+	collector.Start(ctx)
 
 	time.Sleep(100 * time.Millisecond)
 
+	cancel()
 	collector.Stop()
 
 	_, ok := <-collector.Metrics()
@@ -113,18 +116,16 @@ func TestMetricsCollector(t *testing.T) {
 }
 
 func TestMetricsSender(t *testing.T) {
-	rateLimit = 1
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
 
-	flagRunAddr = server.URL
+	cfg := &app.AgentConfig{Address: server.URL[7:], RateLimit: 1, Key: ""}
+	sender := app.NewMetricsSender(cfg)
 
-	sender := NewMetricsSender()
-
-	sender.Start()
+	ctx, cancel := context.WithCancel(context.Background())
+	sender.Start(ctx)
 
 	val := 123.45
 	metrics := []models.Metrics{
@@ -139,6 +140,6 @@ func TestMetricsSender(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
+	cancel()
 	sender.Stop()
-
 }
