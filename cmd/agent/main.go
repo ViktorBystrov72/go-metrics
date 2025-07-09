@@ -94,6 +94,25 @@ func parseFlags() error {
 	return nil
 }
 
+// Интерфейс для сборщика метрик
+//go:generate mockgen -destination=mocks/collector.go -package=mocks . Collector
+type Collector interface {
+	Start()
+	Stop()
+	Metrics() <-chan []models.Metrics
+}
+
+// Интерфейс для отправителя метрик
+//go:generate mockgen -destination=mocks/sender.go -package=mocks . Sender
+type Sender interface {
+	Start()
+	Stop()
+	Metrics() chan<- []models.Metrics
+}
+
+var _ Collector = (*MetricsCollector)(nil)
+var _ Sender = (*MetricsSender)(nil)
+
 // MetricsCollector собирает метрики
 type MetricsCollector struct {
 	metricsChan chan []models.Metrics
@@ -428,36 +447,28 @@ func main() {
 
 	log.Printf("Starting agent with rate limit: %d", rateLimit)
 
-	// Создаем коллектор и отправитель метрик
-	collector := NewMetricsCollector()
-	sender := NewMetricsSender()
+	var collector Collector = NewMetricsCollector()
+	var sender Sender = NewMetricsSender()
 
-	// Запускаем компоненты
 	collector.Start()
 	sender.Start()
 
-	// Соединяем коллектор и отправитель
 	go func() {
 		for metrics := range collector.Metrics() {
 			select {
 			case sender.Metrics() <- metrics:
-			case <-collector.stopChan:
+			case <-collector.(*MetricsCollector).stopChan:
 				return
 			}
 		}
 	}()
 
-	// Ждем сигнала завершения
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
 	<-sigChan
 
 	log.Println("Shutting down agent...")
-
-	// Останавливаем компоненты
 	collector.Stop()
 	sender.Stop()
-
 	log.Println("Agent stopped")
 }
