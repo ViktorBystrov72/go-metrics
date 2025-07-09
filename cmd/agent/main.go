@@ -98,7 +98,7 @@ func parseFlags() error {
 //
 //go:generate mockgen -destination=mocks/collector.go -package=mocks . Collector
 type Collector interface {
-	Start()
+	Start(ctx context.Context)
 	Stop()
 	Metrics() <-chan []models.Metrics
 }
@@ -107,7 +107,7 @@ type Collector interface {
 //
 //go:generate mockgen -destination=mocks/sender.go -package=mocks . Sender
 type Sender interface {
-	Start()
+	Start(ctx context.Context)
 	Stop()
 	Metrics() chan<- []models.Metrics
 }
@@ -118,7 +118,6 @@ var _ Sender = (*MetricsSender)(nil)
 // MetricsCollector собирает метрики
 type MetricsCollector struct {
 	metricsChan chan []models.Metrics
-	stopChan    chan struct{}
 	wg          sync.WaitGroup
 }
 
@@ -126,22 +125,20 @@ type MetricsCollector struct {
 func NewMetricsCollector() *MetricsCollector {
 	return &MetricsCollector{
 		metricsChan: make(chan []models.Metrics, 100),
-		stopChan:    make(chan struct{}),
 	}
 }
 
 // Start запускает сбор метрик
-func (mc *MetricsCollector) Start() {
+func (mc *MetricsCollector) Start(ctx context.Context) {
 	mc.wg.Add(1)
-	go mc.collectRuntimeMetrics()
+	go mc.collectRuntimeMetrics(ctx)
 
 	mc.wg.Add(1)
-	go mc.collectSystemMetrics()
+	go mc.collectSystemMetrics(ctx)
 }
 
 // Stop останавливает сбор метрик
 func (mc *MetricsCollector) Stop() {
-	close(mc.stopChan)
 	mc.wg.Wait()
 	close(mc.metricsChan)
 }
@@ -172,7 +169,7 @@ func NewMetric(id, mType string, value *float64, delta *int64, key string) model
 }
 
 // collectRuntimeMetrics собирает runtime метрики
-func (mc *MetricsCollector) collectRuntimeMetrics() {
+func (mc *MetricsCollector) collectRuntimeMetrics(ctx context.Context) {
 	defer mc.wg.Done()
 
 	ticker := time.NewTicker(pollInterval)
@@ -182,7 +179,7 @@ func (mc *MetricsCollector) collectRuntimeMetrics() {
 
 	for {
 		select {
-		case <-mc.stopChan:
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			metrics := mc.collectRuntimeMetricsData()
@@ -194,7 +191,7 @@ func (mc *MetricsCollector) collectRuntimeMetrics() {
 
 			select {
 			case mc.metricsChan <- metrics:
-			case <-mc.stopChan:
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -202,7 +199,7 @@ func (mc *MetricsCollector) collectRuntimeMetrics() {
 }
 
 // collectSystemMetrics собирает системные метрики через gopsutil
-func (mc *MetricsCollector) collectSystemMetrics() {
+func (mc *MetricsCollector) collectSystemMetrics(ctx context.Context) {
 	defer mc.wg.Done()
 
 	ticker := time.NewTicker(pollInterval)
@@ -210,14 +207,14 @@ func (mc *MetricsCollector) collectSystemMetrics() {
 
 	for {
 		select {
-		case <-mc.stopChan:
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			metrics := mc.collectSystemMetricsData()
 
 			select {
 			case mc.metricsChan <- metrics:
-			case <-mc.stopChan:
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -298,7 +295,6 @@ func (mc *MetricsCollector) collectSystemMetricsData() []models.Metrics {
 // MetricsSender отправляет метрики на сервер
 type MetricsSender struct {
 	metricsChan chan []models.Metrics
-	stopChan    chan struct{}
 	wg          sync.WaitGroup
 	semaphore   chan struct{} // Семафор для ограничения количества запросов
 }
@@ -307,23 +303,21 @@ type MetricsSender struct {
 func NewMetricsSender() *MetricsSender {
 	return &MetricsSender{
 		metricsChan: make(chan []models.Metrics, 100),
-		stopChan:    make(chan struct{}),
 		semaphore:   make(chan struct{}, rateLimit), // Worker pool с ограничением
 	}
 }
 
 // Start запускает отправку метрик
-func (ms *MetricsSender) Start() {
+func (ms *MetricsSender) Start(ctx context.Context) {
 	// Запускаем worker pool
 	for i := 0; i < rateLimit; i++ {
 		ms.wg.Add(1)
-		go ms.worker()
+		go ms.worker(ctx)
 	}
 }
 
 // Stop останавливает отправку метрик
 func (ms *MetricsSender) Stop() {
-	close(ms.stopChan)
 	ms.wg.Wait()
 	close(ms.metricsChan)
 }
@@ -334,12 +328,12 @@ func (ms *MetricsSender) Metrics() chan<- []models.Metrics {
 }
 
 // worker - воркер для отправки метрик
-func (ms *MetricsSender) worker() {
+func (ms *MetricsSender) worker(ctx context.Context) {
 	defer ms.wg.Done()
 
 	for {
 		select {
-		case <-ms.stopChan:
+		case <-ctx.Done():
 			return
 		case metrics := <-ms.metricsChan:
 			// Получаем слот в семафоре
@@ -414,18 +408,19 @@ func main() {
 	}
 
 	log.Printf("Starting agent with rate limit: %d", rateLimit)
-
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var collector Collector = NewMetricsCollector()
 	var sender Sender = NewMetricsSender()
 
-	collector.Start()
-	sender.Start()
+	collector.Start(ctx)
+	sender.Start(ctx)
 
 	go func() {
 		for metrics := range collector.Metrics() {
 			select {
 			case sender.Metrics() <- metrics:
-			case <-collector.(*MetricsCollector).stopChan:
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -436,6 +431,7 @@ func main() {
 	<-sigChan
 
 	log.Println("Shutting down agent...")
+	cancel()
 	collector.Stop()
 	sender.Stop()
 	log.Println("Agent stopped")
