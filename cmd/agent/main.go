@@ -294,6 +294,18 @@ func (mc *MetricsCollector) collectSystemMetricsData() []models.Metrics {
 
 type Task func()
 
+// Интерфейс пула воркеров
+//
+//go:generate mockgen -destination=mocks/pool.go -package=mocks . Pool
+type Pool interface {
+	Start(ctx context.Context)
+	Submit(task Task)
+	Stop()
+}
+
+// Проверка, что WorkerPool реализует Pool
+var _ Pool = (*WorkerPool)(nil)
+
 // WorkerPool управляет пулом воркеров для выполнения задач
 type WorkerPool struct {
 	tasks    chan Task
@@ -337,7 +349,7 @@ func (wp *WorkerPool) Stop() {
 // MetricsSender формирует задачи отправки и кладёт их в pool
 type MetricsSender struct {
 	metricsChan chan []models.Metrics
-	pool        *WorkerPool
+	pool        Pool
 }
 
 func NewMetricsSender(poolSize int) *MetricsSender {
