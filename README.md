@@ -10,6 +10,7 @@
 - Gzip сжатие для HTTP запросов
 - Retry логика для обработки временных ошибок**
 - Автоматический fallback между типами хранилищ
+- Подпись данных по алгоритму SHA256 для обеспечения целостности
 
 ## Retry логика
 
@@ -31,6 +32,37 @@
 - **Агент**: retry при отправке метрик на сервер
 - **Сервер**: retry при работе с PostgreSQL
 - **Batch операции**: retry для batch обновлений
+
+## Хеширование и подпись данных
+
+Сервис поддерживает механизм подписи передаваемых данных по алгоритму SHA256 для обеспечения целостности данных:
+
+### Агент
+- Поддержка флага `-k=<КЛЮЧ>` и переменной окружения `KEY=<КЛЮЧ>`
+- При наличии ключа вычисляет HMAC-SHA256 хеш от тела запроса
+- Передает хеш в HTTP-заголовке `HashSHA256`
+
+### Сервер
+- Поддержка флага `-k=<КЛЮЧ>` и переменной окружения `KEY=<КЛЮЧ>`
+- При наличии ключа проверяет соответствие полученного и вычисленного хеша
+- При несовпадении возвращает `http.StatusBadRequest`
+- При формировании ответа вычисляет хеш и передает в заголовке `HashSHA256`
+
+### Примеры использования
+
+```bash
+# Запуск агента с ключом
+./bin/agent -k="my-secret-key"
+
+# Запуск сервера с ключом
+./bin/server -k="my-secret-key"
+
+# Через переменные окружения
+KEY="my-secret-key" ./bin/agent
+KEY="my-secret-key" ./bin/server
+```
+
+**Примечание**: Это учебный пример для демонстрации механизмов подписи. В реальных проектах рекомендуется использовать более надежные методы аутентификации и авторизации.
 
 ## Архитектура
 
@@ -166,17 +198,20 @@ Content-Type: application/json
 go test ./...
 ```
 
-# Тесты итерации 7 (файловое хранилище)
+#### Тесты итерации 7 (файловое хранилище)
 metricstest -test.v -test.run=^TestIteration7$ -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=.
 
-# Тесты итерации 10 (PostgreSQL + fallback)
+#### Тесты итерации 10 (PostgreSQL + fallback)
 metricstest -test.v -test.run='^TestIteration10A$|^TestIteration10B$' -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=. -database-dsn="postgres://user:pass@localhost:5432/dbname?sslmode=disable"
 
-# Тесты итерации 11 (PostgreSQL)
+#### Тесты итерации 11 (PostgreSQL)
 metricstest -test.v -test.run=^TestIteration11$ -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=. -database-dsn="postgres://user:pass@localhost:5432/dbname?sslmode=disable"
 
-# Тесты итерации 12 (Batch API)
+#### Тесты итерации 12 (Batch API)
 metricstest -test.v -test.run=^TestIteration12$ -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=. -database-dsn="postgres://user:pass@localhost:5432/dbname?sslmode=disable"
+
+#### Тесты итерации 14 (HashKey)
+metricstest -test.v -test.run=^TestIteration14$ -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=. -key="invalidkey" -database-dsn="postgres://postgres:postgres@localhost:5432/praktikum?sslmode=disable"
 
 ### Тестирование retry логики:
 ```bash
