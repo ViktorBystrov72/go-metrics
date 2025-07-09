@@ -95,6 +95,7 @@ func parseFlags() error {
 }
 
 // Интерфейс для сборщика метрик
+//
 //go:generate mockgen -destination=mocks/collector.go -package=mocks . Collector
 type Collector interface {
 	Start()
@@ -103,6 +104,7 @@ type Collector interface {
 }
 
 // Интерфейс для отправителя метрик
+//
 //go:generate mockgen -destination=mocks/sender.go -package=mocks . Sender
 type Sender interface {
 	Start()
@@ -149,6 +151,26 @@ func (mc *MetricsCollector) Metrics() <-chan []models.Metrics {
 	return mc.metricsChan
 }
 
+// NewMetric создаёт метрики с хешем
+func NewMetric(id, mType string, value *float64, delta *int64, key string) models.Metrics {
+	metric := models.Metrics{
+		ID:    id,
+		MType: mType,
+		Value: value,
+		Delta: delta,
+	}
+	if key != "" {
+		var data string
+		if mType == "gauge" && value != nil {
+			data = fmt.Sprintf("%s:%s:%f", id, mType, *value)
+		} else if mType == "counter" && delta != nil {
+			data = fmt.Sprintf("%s:%s:%d", id, mType, *delta)
+		}
+		metric.Hash = utils.CalculateHash([]byte(data), key)
+	}
+	return metric
+}
+
 // collectRuntimeMetrics собирает runtime метрики
 func (mc *MetricsCollector) collectRuntimeMetrics() {
 	defer mc.wg.Done()
@@ -168,16 +190,7 @@ func (mc *MetricsCollector) collectRuntimeMetrics() {
 			// Добавляем счетчик опросов
 			pollCount++
 			pc := pollCount
-			metric := models.Metrics{
-				ID:    "PollCount",
-				MType: "counter",
-				Delta: &pc,
-			}
-			if key != "" {
-				data := fmt.Sprintf("%s:%s:%d", metric.ID, metric.MType, *metric.Delta)
-				metric.Hash = utils.CalculateHash([]byte(data), key)
-			}
-			metrics = append(metrics, metric)
+			metrics = append(metrics, NewMetric("PollCount", "counter", nil, &pc, key))
 
 			select {
 			case mc.metricsChan <- metrics:
@@ -249,29 +262,12 @@ func (mc *MetricsCollector) collectRuntimeMetricsData() []models.Metrics {
 
 	for name, value := range gaugeMetrics {
 		v := value
-		metric := models.Metrics{
-			ID:    name,
-			MType: "gauge",
-			Value: &v,
-		}
-		if key != "" {
-			data := fmt.Sprintf("%s:%s:%f", metric.ID, metric.MType, *metric.Value)
-			metric.Hash = utils.CalculateHash([]byte(data), key)
-		}
-		metrics = append(metrics, metric)
+		metrics = append(metrics, NewMetric(name, "gauge", &v, nil, key))
 	}
 
+	// Добавляем случайное значение
 	rv := rand.Float64()
-	metric := models.Metrics{
-		ID:    "RandomValue",
-		MType: "gauge",
-		Value: &rv,
-	}
-	if key != "" {
-		data := fmt.Sprintf("%s:%s:%f", metric.ID, metric.MType, *metric.Value)
-		metric.Hash = utils.CalculateHash([]byte(data), key)
-	}
-	metrics = append(metrics, metric)
+	metrics = append(metrics, NewMetric("RandomValue", "gauge", &rv, nil, key))
 
 	return metrics
 }
@@ -282,45 +278,17 @@ func (mc *MetricsCollector) collectSystemMetricsData() []models.Metrics {
 
 	// Собираем метрики памяти
 	if vmstat, err := mem.VirtualMemory(); err == nil {
-
 		totalMemory := float64(vmstat.Total)
-		metric := models.Metrics{
-			ID:    "TotalMemory",
-			MType: "gauge",
-			Value: &totalMemory,
-		}
-		if key != "" {
-			data := fmt.Sprintf("%s:%s:%f", metric.ID, metric.MType, *metric.Value)
-			metric.Hash = utils.CalculateHash([]byte(data), key)
-		}
-		metrics = append(metrics, metric)
+		metrics = append(metrics, NewMetric("TotalMemory", "gauge", &totalMemory, nil, key))
 
 		freeMemory := float64(vmstat.Free)
-		metric = models.Metrics{
-			ID:    "FreeMemory",
-			MType: "gauge",
-			Value: &freeMemory,
-		}
-		if key != "" {
-			data := fmt.Sprintf("%s:%s:%f", metric.ID, metric.MType, *metric.Value)
-			metric.Hash = utils.CalculateHash([]byte(data), key)
-		}
-		metrics = append(metrics, metric)
+		metrics = append(metrics, NewMetric("FreeMemory", "gauge", &freeMemory, nil, key))
 	}
 
 	// Собираем метрики CPU
 	if cpuPercentages, err := cpu.Percent(0, true); err == nil {
 		for i, percentage := range cpuPercentages {
-			metric := models.Metrics{
-				ID:    fmt.Sprintf("CPUutilization%d", i+1),
-				MType: "gauge",
-				Value: &percentage,
-			}
-			if key != "" {
-				data := fmt.Sprintf("%s:%s:%f", metric.ID, metric.MType, *metric.Value)
-				metric.Hash = utils.CalculateHash([]byte(data), key)
-			}
-			metrics = append(metrics, metric)
+			metrics = append(metrics, NewMetric(fmt.Sprintf("CPUutilization%d", i+1), "gauge", &percentage, nil, key))
 		}
 	}
 
