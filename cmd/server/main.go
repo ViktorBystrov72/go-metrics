@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	_ "net/http/pprof"
 
 	"github.com/ViktorBystrov72/go-metrics/internal/config"
 	"github.com/ViktorBystrov72/go-metrics/internal/server"
