@@ -54,13 +54,28 @@ func main() {
 
 	router := server.NewRouter(storageInstance, cfg.Key)
 
-	zapLogger, err := zap.NewProduction()
+	// Оптимизированная конфигурация логгера для уменьшения потребления памяти
+	config := zap.NewProductionConfig()
+	config.Sampling = &zap.SamplingConfig{
+		Initial:    100,
+		Thereafter: 100,
+	}
+	config.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
+
+	zapLogger, err := config.Build()
 	if err != nil {
 		log.Fatalf("cannot initialize zap logger: %v", err)
 	}
 	defer zapLogger.Sync()
 
 	loggedRouter := router.WithLogging(zapLogger)
+
+	// Запуск pprof на отдельном порту
+	go func() {
+		if err := http.ListenAndServe("127.0.0.1:6060", nil); err != nil {
+			log.Printf("pprof server error: %v", err)
+		}
+	}()
 
 	log.Fatal(http.ListenAndServe(cfg.RunAddr, loggedRouter))
 }

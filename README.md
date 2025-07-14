@@ -302,3 +302,46 @@ CREATE INDEX idx_metrics_created_at ON metrics(created_at);
 - Используется pgxpool для эффективного пула соединений
 - Метрики сохраняются сразу при обновлении
 - Поддержка уникальных ограничений для предотвращения дублирования
+
+## Оптимизация памяти проекта
+### Сбор базового профиля
+- Базовый профиль памяти: `profiles/base.pprof`
+- Основные потребители памяти:
+    - runtime.allocm (58.62%) — выделение памяти для машин
+    - zap.newCounters (17.56%) — инициализация логгера
+    - validator.map.init.7 (12.01%) — инициализация валидатора
+    - runtime.procresize (11.81%) — настройка процессоров
+
+### Результаты оптимизации
+
+##### Потребление памяти ДО оптимизации:
+- Общее потребление: ~4.27MB
+- Основные потребители: runtime.allocm, zap.newCounters, validator
+
+#### Потребление памяти ПОСЛЕ оптимизации:
+- Общее потребление: ~1.69MB
+- Уменьшение на ~60%
+
+#### Ключевые улучшения:
+1. **Логгер**: Оптимизирована конфигурация zap для снижения потребления памяти
+2. **MemStorage**: Используется RWMutex и уменьшено копирование данных
+
+#### Сбор базового профиля:
+```bash
+go tool pprof -proto -output=profiles/base.pprof http://localhost:6060/debug/pprof/heap
+```
+
+#### Нагрузочное тестирование:
+```bash
+./scripts/profile_memory.sh
+```
+
+#### Сбор результативного профиля:
+```bash
+go tool pprof -proto -output=profiles/result.pprof http://localhost:6060/debug/pprof/heap
+```
+
+#### Сравнение профилей:
+```bash
+go tool pprof -top -diff_base=profiles/base.pprof profiles/result.pprof
+```
