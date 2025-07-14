@@ -6,9 +6,9 @@ import (
 	_ "net/http/pprof"
 
 	"github.com/ViktorBystrov72/go-metrics/internal/config"
+	"github.com/ViktorBystrov72/go-metrics/internal/logger"
 	"github.com/ViktorBystrov72/go-metrics/internal/server"
 	"github.com/ViktorBystrov72/go-metrics/internal/storage"
-	"go.uber.org/zap"
 )
 
 func main() {
@@ -54,15 +54,7 @@ func main() {
 
 	router := server.NewRouter(storageInstance, cfg.Key)
 
-	// Оптимизированная конфигурация логгера для уменьшения потребления памяти
-	config := zap.NewProductionConfig()
-	config.Sampling = &zap.SamplingConfig{
-		Initial:    100,
-		Thereafter: 100,
-	}
-	config.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
-
-	zapLogger, err := config.Build()
+	zapLogger, err := logger.NewZapLogger()
 	if err != nil {
 		log.Fatalf("cannot initialize zap logger: %v", err)
 	}

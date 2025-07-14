@@ -50,3 +50,15 @@ func WithLogging(logger *zap.Logger, h http.Handler) http.Handler {
 		)
 	})
 }
+
+// NewZapLogger создает zap.Logger с оптимизированной конфигурацией для сервиса.
+// Можно переиспользовать во всех сервисах проекта.
+func NewZapLogger() (*zap.Logger, error) {
+	config := zap.NewProductionConfig()
+	config.Sampling = &zap.SamplingConfig{
+		Initial:    100,
+		Thereafter: 100,
+	}
+	config.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
+	return config.Build()
+}
