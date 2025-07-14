@@ -50,6 +50,7 @@ func ExampleConfig_withDatabase() {
 	fmt.Printf("Restore on start: %t\n", cfg.Restore)
 	fmt.Printf("Database DSN: %s\n", cfg.DatabaseDSN)
 	fmt.Printf("Database configured: %t\n", cfg.DatabaseDSN != "")
+	fmt.Printf("Key is set: %t\n", cfg.Key != "")
 
 	// Output:
 	// Server address: 0.0.0.0:9090
@@ -58,6 +59,7 @@ func ExampleConfig_withDatabase() {
 	// Restore on start: false
 	// Database DSN: postgres://user:pass@localhost:5432/metrics
 	// Database configured: true
+	// Key is set: true
 }
 
 // ExampleConfig_minimal демонстрирует минимальную конфигурацию.
@@ -74,6 +76,7 @@ func ExampleConfig_minimal() {
 
 	fmt.Printf("Server address: %s\n", cfg.RunAddr)
 	fmt.Printf("Store interval: %d seconds\n", cfg.StoreInterval)
+	fmt.Printf("File storage path: %s\n", cfg.FileStoragePath)
 	fmt.Printf("Restore on start: %t\n", cfg.Restore)
 	fmt.Printf("Database configured: %t\n", cfg.DatabaseDSN != "")
 	fmt.Printf("Key is set: %t\n", cfg.Key != "")
@@ -81,6 +84,7 @@ func ExampleConfig_minimal() {
 	// Output:
 	// Server address: localhost:8080
 	// Store interval: 300 seconds
+	// File storage path: /tmp/metrics-db.json
 	// Restore on start: true
 	// Database configured: false
 	// Key is set: false
