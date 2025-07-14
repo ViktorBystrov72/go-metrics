@@ -1,3 +1,4 @@
+// Package middleware предоставляет HTTP middleware для сжатия и обработки запросов.
 package middleware
 
 import (
@@ -16,6 +17,10 @@ func (w *gzipResponseWriter) Write(b []byte) (int, error) {
 	return w.Writer.Write(b)
 }
 
+// GzipMiddleware создает middleware для сжатия HTTP-ответов и распаковки запросов.
+// Автоматически сжимает ответы, если клиент поддерживает gzip.
+// Распаковывает входящие запросы, если они сжаты gzip.
+// Устанавливает заголовок Content-Encoding для сжатых ответов.
 func GzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Декомпрессия запроса
