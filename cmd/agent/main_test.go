@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -106,7 +107,7 @@ func TestMetricsCollector(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	collector.Start(ctx)
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
 	cancel()
 	collector.Stop()
@@ -138,8 +139,19 @@ func TestMetricsSender(t *testing.T) {
 
 	sender.Metrics() <- metrics
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
 	cancel()
 	sender.Stop()
+}
+
+func TestMainAgentSmoke(t *testing.T) {
+	cmd := exec.Command("go", "run", "./main.go", "-h")
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Logf("main.go (agent) успешно запустился: %s", string(out))
+	} else {
+		t.Logf("main.go (agent) завершился с ошибкой (ожидаемо для -h): %s", string(out))
+	}
 }

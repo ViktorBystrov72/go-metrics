@@ -196,8 +196,14 @@ Content-Type: application/json
 ### Запуск тестов:
 ```bash
 go test ./...
-```
-
+```  
+  
+### Процент покрытия тестами
+```bash
+go test ./... -coverprofile=coverage.out 
+go tool cover -func=coverage.out | tail -1
+```  
+  
 #### Тесты итерации 7 (файловое хранилище)
 metricstest -test.v -test.run=^TestIteration7$ -agent-binary-path=cmd/agent/agent -binary-path=cmd/server/server -server-port=8080 -source-path=.
 
@@ -221,7 +227,9 @@ metricstest -test.v -test.run=^TestIteration14$ -agent-binary-path=cmd/agent/age
 # Тест с недоступной PostgreSQL
 DATABASE_DSN='postgres://invalid:invalid@localhost:5432/invalid' ./bin/server
 ```
+  
 
+  
 ### Бенчмарки:
 ```bash
 go test -bench=. ./internal/storage/

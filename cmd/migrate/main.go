@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"os"
 
 	"github.com/ViktorBystrov72/go-metrics/internal/storage"
 )
@@ -46,6 +45,6 @@ func main() {
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
 		fmt.Println("Available commands: up, down, status")
-		os.Exit(1)
+		log.Fatal("Invalid command")
 	}
 }
