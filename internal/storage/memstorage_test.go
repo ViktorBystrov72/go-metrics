@@ -3,6 +3,8 @@ package storage
 import (
 	"os"
 	"testing"
+
+	"github.com/ViktorBystrov72/go-metrics/internal/models"
 )
 
 func TestMemStorage_SaveToFile_LoadFromFile(t *testing.T) {
@@ -136,3 +138,56 @@ func TestMemStorage_SaveToFile_Concurrent(t *testing.T) {
 		t.Errorf("Expected 10 counters, got %d", len(counters))
 	}
 }
+
+func TestMemStorage_Ping(t *testing.T) {
+	s := NewMemStorage()
+	if err := s.Ping(); err != nil {
+		t.Errorf("Ping() должен возвращать nil для MemStorage, получено: %v", err)
+	}
+}
+
+func TestMemStorage_IsDatabase(t *testing.T) {
+	s := NewMemStorage()
+	if s.IsDatabase() {
+		t.Error("IsDatabase() должен возвращать false для MemStorage")
+	}
+}
+
+func TestMemStorage_IsAvailable(t *testing.T) {
+	s := NewMemStorage()
+	if !s.IsAvailable() {
+		t.Error("IsAvailable() должен возвращать true для MemStorage")
+	}
+}
+
+func TestMemStorage_UpdateBatch(t *testing.T) {
+	s := NewMemStorage()
+	metrics := []models.Metrics{
+		{ID: "g1", MType: "gauge", Value: floatPtr(1.23)},
+		{ID: "c1", MType: "counter", Delta: intPtr(10)},
+	}
+	err := s.UpdateBatch(metrics)
+	if err != nil {
+		t.Errorf("UpdateBatch() вернул ошибку: %v", err)
+	}
+	if v, _ := s.GetGauge("g1"); v != 1.23 {
+		t.Errorf("UpdateBatch() не сохранил gauge")
+	}
+	if v, _ := s.GetCounter("c1"); v != 10 {
+		t.Errorf("UpdateBatch() не сохранил counter")
+	}
+}
+
+func TestMemStorage_UpdateBatch_Error(t *testing.T) {
+	s := NewMemStorage()
+	metrics := []models.Metrics{
+		{ID: "bad", MType: "unknown"},
+	}
+	err := s.UpdateBatch(metrics)
+	if err == nil {
+		t.Error("UpdateBatch() должен вернуть ошибку для неизвестного типа метрики")
+	}
+}
+
+func floatPtr(f float64) *float64 { return &f }
+func intPtr(i int64) *int64       { return &i }
