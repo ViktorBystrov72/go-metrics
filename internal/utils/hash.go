@@ -1,3 +1,4 @@
+// Package utils предоставляет утилиты для работы с хешированием и повторными попытками.
 package utils
 
 import (
@@ -6,7 +7,9 @@ import (
 	"encoding/hex"
 )
 
-// CalculateHash вычисляет HMAC-SHA256 хеш от данных с использованием ключа
+// CalculateHash вычисляет HMAC-SHA256 хеш от данных с использованием ключа.
+// Если ключ пустой, возвращает пустую строку.
+// Используется для подписи метрик для проверки целостности данных.
 func CalculateHash(data []byte, key string) string {
 	if key == "" {
 		return ""
@@ -17,7 +20,9 @@ func CalculateHash(data []byte, key string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// VerifyHash проверяет соответствие хеша данным и ключу
+// VerifyHash проверяет соответствие хеша данным и ключу.
+// Возвращает true, если хеш соответствует данным, иначе false.
+// Если ключ или ожидаемый хеш пустые, считает проверку успешной.
 func VerifyHash(data []byte, key string, expectedHash string) bool {
 	if key == "" || expectedHash == "" {
 		return true // если ключ не задан, считаем что проверка прошла

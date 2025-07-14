@@ -11,7 +11,7 @@ import (
 
 // MemStorage реализация хранилища в памяти
 type MemStorage struct {
-	mu       sync.Mutex
+	mu       sync.RWMutex // RWMutex для лучшей производительности при чтении
 	gauges   map[string]float64
 	counters map[string]int64
 }
@@ -40,8 +40,8 @@ func (s *MemStorage) UpdateCounter(name string, value int64) {
 
 // GetGauge возвращает значение gauge метрики
 func (s *MemStorage) GetGauge(name string) (float64, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	value, exists := s.gauges[name]
 	if !exists {
@@ -53,8 +53,8 @@ func (s *MemStorage) GetGauge(name string) (float64, error) {
 
 // GetCounter возвращает значение counter метрики
 func (s *MemStorage) GetCounter(name string) (int64, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	value, exists := s.counters[name]
 	if !exists {
@@ -66,10 +66,10 @@ func (s *MemStorage) GetCounter(name string) (int64, error) {
 
 // GetAllGauges возвращает все gauge метрики
 func (s *MemStorage) GetAllGauges() map[string]float64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-	result := make(map[string]float64)
+	result := make(map[string]float64, len(s.gauges))
 	for k, v := range s.gauges {
 		result[k] = v
 	}
@@ -78,10 +78,10 @@ func (s *MemStorage) GetAllGauges() map[string]float64 {
 
 // GetAllCounters возвращает все counter метрики
 func (s *MemStorage) GetAllCounters() map[string]int64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-	result := make(map[string]int64)
+	result := make(map[string]int64, len(s.counters))
 	for k, v := range s.counters {
 		result[k] = v
 	}
@@ -94,21 +94,20 @@ type storageDump struct {
 }
 
 func (s *MemStorage) SaveToFile(filename string) error {
-	s.mu.Lock()
-	gaugesCopy := make(map[string]float64, len(s.gauges))
-	for k, v := range s.gauges {
-		gaugesCopy[k] = v
-	}
-	countersCopy := make(map[string]int64, len(s.counters))
-	for k, v := range s.counters {
-		countersCopy[k] = v
-	}
-	s.mu.Unlock()
-
+	s.mu.RLock()
 	dump := storageDump{
-		Gauges:   gaugesCopy,
-		Counters: countersCopy,
+		Gauges:   make(map[string]float64, len(s.gauges)),
+		Counters: make(map[string]int64, len(s.counters)),
 	}
+
+	// Копируем данные под блокировкой чтения
+	for k, v := range s.gauges {
+		dump.Gauges[k] = v
+	}
+	for k, v := range s.counters {
+		dump.Counters[k] = v
+	}
+	s.mu.RUnlock()
 
 	file, err := os.Create(filename)
 	if err != nil {

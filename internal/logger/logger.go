@@ -1,3 +1,4 @@
+// Package logger предоставляет middleware для логирования HTTP-запросов.
 package logger
 
 import (
@@ -28,6 +29,9 @@ func (r *loggingResponseWriter) WriteHeader(statusCode int) {
 	r.responseData.status = statusCode
 }
 
+// WithLogging создает middleware для логирования HTTP-запросов.
+// Логирует URI, метод, статус ответа, время выполнения и размер ответа.
+// Использует zap логгер для структурированного логирования.
 func WithLogging(logger *zap.Logger, h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -45,4 +49,16 @@ func WithLogging(logger *zap.Logger, h http.Handler) http.Handler {
 			zap.Int("size", respData.size),
 		)
 	})
+}
+
+// NewZapLogger создает zap.Logger с оптимизированной конфигурацией для сервиса.
+// Можно переиспользовать во всех сервисах проекта.
+func NewZapLogger() (*zap.Logger, error) {
+	config := zap.NewProductionConfig()
+	config.Sampling = &zap.SamplingConfig{
+		Initial:    100,
+		Thereafter: 100,
+	}
+	config.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
+	return config.Build()
 }

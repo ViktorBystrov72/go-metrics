@@ -3,11 +3,12 @@ package main
 import (
 	"log"
 	"net/http"
+	_ "net/http/pprof"
 
 	"github.com/ViktorBystrov72/go-metrics/internal/config"
+	"github.com/ViktorBystrov72/go-metrics/internal/logger"
 	"github.com/ViktorBystrov72/go-metrics/internal/server"
 	"github.com/ViktorBystrov72/go-metrics/internal/storage"
-	"go.uber.org/zap"
 )
 
 func main() {
@@ -53,13 +54,20 @@ func main() {
 
 	router := server.NewRouter(storageInstance, cfg.Key)
 
-	zapLogger, err := zap.NewProduction()
+	zapLogger, err := logger.NewZapLogger()
 	if err != nil {
 		log.Fatalf("cannot initialize zap logger: %v", err)
 	}
 	defer zapLogger.Sync()
 
 	loggedRouter := router.WithLogging(zapLogger)
+
+	// Запуск pprof на отдельном порту
+	go func() {
+		if err := http.ListenAndServe("127.0.0.1:6060", nil); err != nil {
+			log.Printf("pprof server error: %v", err)
+		}
+	}()
 
 	log.Fatal(http.ListenAndServe(cfg.RunAddr, loggedRouter))
 }
