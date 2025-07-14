@@ -208,6 +208,32 @@ func ExampleMemStorage_UpdateBatch() {
 	// Counters updated: 2
 }
 
+// ExampleMemStorage_UpdateBatch_withErrors демонстрирует обработку ошибок при массовом обновлении.
+func ExampleMemStorage_UpdateBatch_withErrors() {
+	storage := NewMemStorage()
+
+	// Создаем массив метрик с некорректным типом
+	metrics := []models.Metrics{
+		{
+			ID:    "invalid_metric",
+			MType: "invalid_type", // неизвестный тип
+			Value: func() *float64 { v := 100.0; return &v }(),
+		},
+	}
+
+	// Пытаемся обновить метрики
+	err := storage.UpdateBatch(metrics)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
+
+	fmt.Printf("Update successful\n")
+
+	// Output:
+	// Error: unknown metric type: invalid_type
+}
+
 // ExampleMemStorage_Ping демонстрирует проверку доступности хранилища.
 func ExampleMemStorage_Ping() {
 	storage := NewMemStorage()
