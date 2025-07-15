@@ -302,10 +302,8 @@ func TestSendMetricsBatch_GzipError(t *testing.T) {
 	bufPool.New = func() interface{} { return nil }
 	defer func() { bufPool.New = originalNew }()
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Ожидалась паника при ошибке gzip")
-		}
-	}()
-	_ = sender.SendMetricsBatch(metrics)
+	err := sender.SendMetricsBatch(metrics)
+	if err == nil {
+		t.Error("Ожидалась ошибка при ошибке gzip")
+	}
 }

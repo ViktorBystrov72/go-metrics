@@ -353,3 +353,44 @@ go tool pprof -proto -output=profiles/result.pprof http://localhost:6060/debug/p
 ```bash
 go tool pprof -top -diff_base=profiles/base.pprof profiles/result.pprof
 ```
+
+# Сборка и запуск
+
+## Сборка с версией, датой и коммитом
+
+Для удобной сборки используйте Makefile. При сборке автоматически подставляются:
+- версия (VERSION)
+- дата сборки (BUILD_DATE)
+- коммит (BUILD_COMMIT)
+
+### Быстрая сборка
+
+```sh
+make build
+```
+
+### Сборка с указанием версии
+
+```sh
+make build-with-version VERSION=1.2.3
+```
+
+### Ручная сборка через go build
+
+Можно передать значения переменных через флаги линковщика:
+
+```sh
+go build -ldflags "-X main.buildVersion=1.2.3 -X 'main.buildDate=2025-07-15 20:00:00' -X main.buildCommit=abc123" -o bin/server cmd/server/main.go
+```
+
+## Проверка версии
+
+После сборки при запуске приложения будет выведена информация:
+
+```
+Build version: 1.2.3
+Build date: 2025-07-15 20:00:00
+Build commit: abc123
+```
+
+Если переменные не заданы, будет выведено N/A.
