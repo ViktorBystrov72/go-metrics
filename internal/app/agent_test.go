@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 
@@ -298,9 +297,11 @@ func TestSendMetricsBatch_MarshalError(t *testing.T) {
 func TestSendMetricsBatch_GzipError(t *testing.T) {
 	sender := NewMetricsSender(&AgentConfig{Address: "localhost:8080", RateLimit: 1, Key: "test"}).(*MetricsSender)
 	metrics := []models.Metrics{{ID: "test", MType: "gauge", Value: func() *float64 { v := 1.0; return &v }()}}
-	oldBufPool := bufPool
-	bufPool = sync.Pool{New: func() interface{} { return nil }}
-	defer func() { bufPool = oldBufPool }()
+
+	originalNew := bufPool.New
+	bufPool.New = func() interface{} { return nil }
+	defer func() { bufPool.New = originalNew }()
+
 	defer func() {
 		if r := recover(); r == nil {
 			t.Error("Ожидалась паника при ошибке gzip")
