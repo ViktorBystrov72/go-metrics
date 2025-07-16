@@ -24,7 +24,7 @@ func TestGzipMiddlewareWithUnsupportedContentType(t *testing.T) {
 	middleware.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Errorf("Ожидался статус %d, получен %d", http.StatusOK, w.Code)
+		t.Fatalf("Ожидался статус %d, получен %d", http.StatusOK, w.Code)
 	}
 }
 
@@ -42,7 +42,7 @@ func TestGzipMiddlewareWithoutAcceptEncoding(t *testing.T) {
 	middleware.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Errorf("Ожидался статус %d, получен %d", http.StatusOK, w.Code)
+		t.Fatalf("Ожидался статус %d, получен %d", http.StatusOK, w.Code)
 	}
 
 	// Проверяем, что ответ не сжат
@@ -67,7 +67,7 @@ func TestGzipMiddlewareWithEmptyBody(t *testing.T) {
 	middleware.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Errorf("Ожидался статус %d, получен %d", http.StatusOK, w.Code)
+		t.Fatalf("Ожидался статус %d, получен %d", http.StatusOK, w.Code)
 	}
 }
 
@@ -89,7 +89,7 @@ func TestGzipMiddlewareWithLargeResponse(t *testing.T) {
 	middleware.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Errorf("Ожидался статус %d, получен %d", http.StatusOK, w.Code)
+		t.Fatalf("Ожидался статус %d, получен %d", http.StatusOK, w.Code)
 	}
 
 	// Проверяем, что ответ сжат
@@ -131,7 +131,7 @@ func TestGzipMiddlewareWithMultipleEncodings(t *testing.T) {
 	middleware.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Errorf("Ожидался статус %d, получен %d", http.StatusOK, w.Code)
+		t.Fatalf("Ожидался статус %d, получен %d", http.StatusOK, w.Code)
 	}
 
 	// Проверяем, что ответ сжат
@@ -156,7 +156,7 @@ func TestGzipMiddlewareWithGzipOnly(t *testing.T) {
 	middleware.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Errorf("Ожидался статус %d, получен %d", http.StatusOK, w.Code)
+		t.Fatalf("Ожидался статус %d, получен %d", http.StatusOK, w.Code)
 	}
 
 	// Проверяем, что ответ сжат
