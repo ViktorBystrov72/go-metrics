@@ -10,5 +10,5 @@ import (
 func TestExitCheckAnalyzer(t *testing.T) {
 	// analysistest.Run применяет тестируемый анализатор ExitCheckAnalyzer
 	// к пакетам из папки testdata и проверяет ожидания
-	analysistest.Run(t, analysistest.TestData(), ExitCheckAnalyzer, "./...")
+	analysistest.Run(t, analysistest.TestData(), ExitCheckAnalyzer, "pkg1", "pkg2")
 }

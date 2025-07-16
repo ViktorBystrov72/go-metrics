@@ -46,16 +46,19 @@ func run(pass *analysis.Pass) (interface{}, error) {
 			}
 
 			// Проверка не вызов os.Exit
-			if !isOsExitCall(callExpr) {
+			if !isOsExitCall(pass, callExpr) {
 				return true
 			}
 
 			// Проверка вызов не в функции main
-			if !isInMainFunction(pass, callExpr) {
+			if !isInMainFunction(file, callExpr) {
 				return true
 			}
 
-			pass.Reportf(callExpr.Pos(), "прямой вызов os.Exit в функции main запрещен")
+			pass.Report(analysis.Diagnostic{
+				Pos:     callExpr.Pos(),
+				Message: "прямой вызов os.Exit в функции main запрещен",
+			})
 			return true
 		})
 	}
@@ -63,7 +66,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 }
 
 // isOsExitCall проверяет, является ли вызов функцией os.Exit.
-func isOsExitCall(call *ast.CallExpr) bool {
+func isOsExitCall(pass *analysis.Pass, call *ast.CallExpr) bool {
 	// Проверка на селектор
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok {
@@ -76,16 +79,27 @@ func isOsExitCall(call *ast.CallExpr) bool {
 		return false
 	}
 
+	if pass.TypesInfo != nil && pass.TypesInfo.Uses != nil {
+		if obj := pass.TypesInfo.Uses[ident]; obj != nil {
+			if pkg := obj.Pkg(); pkg != nil {
+				// Проверяем что это пакет "os" и метод "Exit"
+				if pkg.Path() == "os" && sel.Sel.Name == "Exit" {
+					return true
+				}
+			}
+		}
+	}
+
 	return ident.Name == "os" && sel.Sel.Name == "Exit"
 }
 
 // isInMainFunction проверяет, находится ли вызов в функции main.
-func isInMainFunction(pass *analysis.Pass, call *ast.CallExpr) bool {
+func isInMainFunction(file *ast.File, call *ast.CallExpr) bool {
 	// Получаем позицию вызова
 	callPos := call.Pos()
 
 	// Обходим все функции в файле
-	for _, decl := range pass.Files[0].Decls {
+	for _, decl := range file.Decls {
 		// Если это не объявление функции
 		funcDecl, ok := decl.(*ast.FuncDecl)
 		if !ok {
