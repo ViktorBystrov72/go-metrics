@@ -34,22 +34,28 @@ var ExitCheckAnalyzer = &analysis.Analyzer{
 // run выполняет анализ кода на предмет вызовов os.Exit в функции main.
 func run(pass *analysis.Pass) (interface{}, error) {
 	for _, file := range pass.Files {
-		// Проверяем, что файл принадлежит пакету main
 		if file.Name.Name != "main" {
 			continue
 		}
 
 		ast.Inspect(file, func(node ast.Node) bool {
-			// Ищем вызовы функций
-			if callExpr, ok := node.(*ast.CallExpr); ok {
-				// Проверяем, что это вызов os.Exit
-				if isOsExitCall(callExpr) {
-					// Проверяем, что вызов находится в функции main
-					if isInMainFunction(pass, callExpr) {
-						pass.Reportf(callExpr.Pos(), "прямой вызов os.Exit в функции main запрещен")
-					}
-				}
+			// Проверка вызова функции
+			callExpr, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
 			}
+
+			// Проверка не вызов os.Exit
+			if !isOsExitCall(callExpr) {
+				return true
+			}
+
+			// Проверка вызов не в функции main
+			if !isInMainFunction(pass, callExpr) {
+				return true
+			}
+
+			pass.Reportf(callExpr.Pos(), "прямой вызов os.Exit в функции main запрещен")
 			return true
 		})
 	}
@@ -58,12 +64,19 @@ func run(pass *analysis.Pass) (interface{}, error) {
 
 // isOsExitCall проверяет, является ли вызов функцией os.Exit.
 func isOsExitCall(call *ast.CallExpr) bool {
-	if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
-		if ident, ok := sel.X.(*ast.Ident); ok {
-			return ident.Name == "os" && sel.Sel.Name == "Exit"
-		}
+	// Проверка на селектор
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
 	}
-	return false
+
+	// Если левая часть селектора не идентификатор
+	ident, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return false
+	}
+
+	return ident.Name == "os" && sel.Sel.Name == "Exit"
 }
 
 // isInMainFunction проверяет, находится ли вызов в функции main.
@@ -73,14 +86,20 @@ func isInMainFunction(pass *analysis.Pass, call *ast.CallExpr) bool {
 
 	// Обходим все функции в файле
 	for _, decl := range pass.Files[0].Decls {
-		if funcDecl, ok := decl.(*ast.FuncDecl); ok {
-			// Проверяем, что это функция main
-			if funcDecl.Name.Name == "main" {
-				// Проверяем, что вызов находится внутри этой функции
-				if callPos >= funcDecl.Pos() && callPos <= funcDecl.End() {
-					return true
-				}
-			}
+		// Если это не объявление функции
+		funcDecl, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+
+		// Если это не функция main
+		if funcDecl.Name.Name != "main" {
+			continue
+		}
+
+		// Проверяем, что вызов находится внутри этой функции
+		if callPos >= funcDecl.Pos() && callPos <= funcDecl.End() {
+			return true
 		}
 	}
 	return false
