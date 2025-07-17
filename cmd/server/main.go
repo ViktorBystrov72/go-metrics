@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	_ "net/http/pprof"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/ViktorBystrov72/go-metrics/internal/config"
 	"github.com/ViktorBystrov72/go-metrics/internal/logger"
@@ -87,12 +92,65 @@ func main() {
 
 	loggedRouter := router.WithLogging(zapLogger)
 
+	// Создаем HTTP сервер
+	srv := &http.Server{
+		Addr:    cfg.RunAddr,
+		Handler: loggedRouter,
+	}
+
 	// Запуск pprof на отдельном порту
+	pprofServer := &http.Server{
+		Addr: "127.0.0.1:6060",
+	}
 	go func() {
-		if err := http.ListenAndServe("127.0.0.1:6060", nil); err != nil {
+		if err := pprofServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("pprof server error: %v", err)
 		}
 	}()
 
-	log.Fatal(http.ListenAndServe(cfg.RunAddr, loggedRouter))
+	// Канал для graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+
+	// Запускаем сервер в горутине
+	go func() {
+		log.Printf("Запуск сервера на %s", cfg.RunAddr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("HTTP server error: %v", err)
+		}
+	}()
+
+	// Ожидаем сигнал остановки
+	sig := <-sigChan
+	log.Printf("Получен сигнал %v, запускаем graceful shutdown...", sig)
+
+	// Создаем контекст с таймаутом для graceful shutdown
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	// Останавливаем HTTP сервер
+	log.Printf("Остановка HTTP сервера...")
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Ошибка при остановке HTTP сервера: %v", err)
+	} else {
+		log.Printf("HTTP сервер остановлен")
+	}
+
+	// Останавливаем pprof сервер
+	log.Printf("Остановка pprof сервера...")
+	if err := pprofServer.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Ошибка при остановке pprof сервера: %v", err)
+	} else {
+		log.Printf("pprof сервер остановлен")
+	}
+
+	// Останавливаем StorageManager
+	storageManager.Stop()
+
+	// Принудительно сохраняем данные и закрываем подключения
+	if err := storageManager.Shutdown(); err != nil {
+		log.Printf("Ошибка при завершении работы с хранилищем: %v", err)
+	}
+
+	log.Printf("Сервер успешно завершен")
 }

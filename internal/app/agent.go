@@ -42,7 +42,12 @@ func (a *App) Run(ctx context.Context) error {
 	a.collector.Start(ctx)
 	a.sender.Start(ctx)
 
+	// WaitGroup для отслеживания горутины переправки метрик
+	var transferWg sync.WaitGroup
+	transferWg.Add(1)
+
 	go func() {
+		defer transferWg.Done()
 		for metrics := range a.collector.Metrics() {
 			select {
 			case a.sender.Metrics() <- metrics:
@@ -50,14 +55,26 @@ func (a *App) Run(ctx context.Context) error {
 				return
 			}
 		}
+		log.Printf("Завершена передача метрик из collector в sender")
 	}()
 
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	<-sigChan
-	log.Println("Shutting down agent...")
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	sig := <-sigChan
+	log.Printf("Получен сигнал %v, выполняем graceful shutdown...", sig)
+
+	// 1. Сначала останавливаем сбор метрик
+	log.Printf("Остановка сбора метрик...")
 	a.collector.Stop()
+
+	// 2. Ждем завершения передачи всех собранных метрик
+	log.Printf("Ожидание завершения передачи метрик...")
+	transferWg.Wait()
+
+	// 3. Останавливаем отправителя
+	log.Printf("Остановка отправки метрик...")
 	a.sender.Stop()
+
 	log.Println("Agent stopped")
 	return nil
 }
@@ -88,28 +105,37 @@ type MetricsCollector struct {
 	wg           sync.WaitGroup
 	pollInterval time.Duration
 	key          string
+
+	// Поля для graceful shutdown
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // NewMetricsCollector создаёт новый Collector с учётом конфига
 func NewMetricsCollector(cfg *AgentConfig) Collector {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &MetricsCollector{
 		metricsChan:  make(chan []models.Metrics, 100),
 		pollInterval: time.Duration(cfg.PollInterval) * time.Second,
 		key:          cfg.Key,
+		ctx:          ctx,
+		cancel:       cancel,
 	}
 }
 
 // Start запускает сбор метрик
 func (mc *MetricsCollector) Start(ctx context.Context) {
 	mc.wg.Add(1)
-	go mc.collectRuntimeMetrics(ctx)
+	go mc.collectRuntimeMetrics(mc.ctx)
 
 	mc.wg.Add(1)
-	go mc.collectSystemMetrics(ctx)
+	go mc.collectSystemMetrics(mc.ctx)
 }
 
 // Stop останавливает сбор метрик
 func (mc *MetricsCollector) Stop() {
+	// Отменяем контекст, чтобы остановить горутины сбора
+	mc.cancel()
 	mc.wg.Wait()
 	close(mc.metricsChan)
 }
@@ -299,6 +325,10 @@ type MetricsSender struct {
 	address     string
 	key         string
 	publicKey   *rsa.PublicKey
+
+	// Поля для graceful shutdown
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // NewMetricsSender создаёт новый Sender с учётом конфига
@@ -317,17 +347,20 @@ func NewMetricsSender(cfg *AgentConfig) Sender {
 		}
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	return &MetricsSender{
 		metricsChan: make(chan []models.Metrics, 100),
 		pool:        NewWorkerPool(cfg.RateLimit),
 		address:     fmt.Sprintf("http://%s", cfg.Address),
 		key:         cfg.Key,
 		publicKey:   publicKey,
+		ctx:         ctx,
+		cancel:      cancel,
 	}
 }
 
 func (ms *MetricsSender) Start(ctx context.Context) {
-	ms.pool.Start(ctx)
+	ms.pool.Start(ms.ctx)
 	go func() {
 		for metrics := range ms.metricsChan {
 			m := metrics
@@ -339,6 +372,8 @@ func (ms *MetricsSender) Start(ctx context.Context) {
 }
 
 func (ms *MetricsSender) Stop() {
+	// Отменяем контекст, чтобы остановить WorkerPool
+	ms.cancel()
 	ms.pool.Stop()
 	close(ms.metricsChan)
 }
