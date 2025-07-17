@@ -77,7 +77,7 @@ func main() {
 	storageManager := server.NewStorageManager(storageInstance, storageConfig)
 	storageManager.Start()
 
-	router := server.NewRouter(storageInstance, cfg.Key)
+	router := server.NewRouter(storageInstance, cfg.Key, cfg.CryptoKey)
 
 	zapLogger, err := logger.NewZapLogger()
 	if err != nil {

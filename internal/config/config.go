@@ -15,6 +15,7 @@ type Config struct {
 	Restore         bool
 	DatabaseDSN     string
 	Key             string
+	CryptoKey       string
 }
 
 // Load загружает конфигурацию из флагов и переменных окружения
@@ -26,6 +27,7 @@ func Load() (*Config, error) {
 		flagRestore         bool
 		flagDatabaseDSN     string
 		flagKey             string
+		flagCryptoKey       string
 	)
 
 	flag.StringVar(&flagRunAddr, "a", "localhost:8080", "address and port to run server")
@@ -34,6 +36,7 @@ func Load() (*Config, error) {
 	flag.BoolVar(&flagRestore, "r", true, "restore from file on start")
 	flag.StringVar(&flagDatabaseDSN, "d", "", "database DSN")
 	flag.StringVar(&flagKey, "k", "", "signature key")
+	flag.StringVar(&flagCryptoKey, "crypto-key", "", "path to private key file for decryption")
 	flag.Parse()
 
 	// Приоритет: env > flag > default
@@ -61,6 +64,9 @@ func Load() (*Config, error) {
 	if envKey := os.Getenv("KEY"); envKey != "" {
 		flagKey = envKey
 	}
+	if envCryptoKey := os.Getenv("CRYPTO_KEY"); envCryptoKey != "" {
+		flagCryptoKey = envCryptoKey
+	}
 
 	if flagStoreInterval < 0 {
 		return nil, fmt.Errorf("STORE_INTERVAL must be non-negative, got %d", flagStoreInterval)
@@ -73,5 +79,6 @@ func Load() (*Config, error) {
 		Restore:         flagRestore,
 		DatabaseDSN:     flagDatabaseDSN,
 		Key:             flagKey,
+		CryptoKey:       flagCryptoKey,
 	}, nil
 }

@@ -10,6 +10,8 @@ require (
 	github.com/shirou/gopsutil/v3 v3.24.5
 	github.com/stretchr/testify v1.10.0
 	go.uber.org/zap v1.26.0
+	golang.org/x/tools v0.35.0
+	honnef.co/go/tools v0.6.1
 )
 
 require (
@@ -34,7 +36,6 @@ require (
 	golang.org/x/sync v0.16.0 // indirect
 	golang.org/x/sys v0.34.0 // indirect
 	golang.org/x/text v0.25.0 // indirect
-	golang.org/x/tools v0.35.0 // indirect
+	golang.org/x/tools/go/expect v0.1.1-deprecated // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	honnef.co/go/tools v0.6.1 // indirect
 )

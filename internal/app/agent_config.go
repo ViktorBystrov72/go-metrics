@@ -13,6 +13,7 @@ type AgentConfig struct {
 	PollInterval   int
 	Key            string
 	RateLimit      int
+	CryptoKey      string
 }
 
 func ParseAgentConfig() (*AgentConfig, error) {
@@ -22,6 +23,7 @@ func ParseAgentConfig() (*AgentConfig, error) {
 		pollInterval   int
 		key            string
 		rateLimit      int
+		cryptoKey      string
 	)
 
 	flag.StringVar(&address, "a", "localhost:8080", "address and port to run server")
@@ -29,6 +31,7 @@ func ParseAgentConfig() (*AgentConfig, error) {
 	flag.IntVar(&pollInterval, "p", 2, "poll interval in seconds")
 	flag.StringVar(&key, "k", "", "signature key")
 	flag.IntVar(&rateLimit, "l", 1, "rate limit for concurrent requests")
+	flag.StringVar(&cryptoKey, "crypto-key", "", "path to public key file for encryption")
 	flag.Parse()
 
 	if env := os.Getenv("ADDRESS"); env != "" {
@@ -58,6 +61,9 @@ func ParseAgentConfig() (*AgentConfig, error) {
 	if env := os.Getenv("KEY"); env != "" {
 		key = env
 	}
+	if env := os.Getenv("CRYPTO_KEY"); env != "" {
+		cryptoKey = env
+	}
 
 	if reportInterval <= 0 {
 		return nil, fmt.Errorf("REPORT_INTERVAL должен быть больше 0")
@@ -75,5 +81,6 @@ func ParseAgentConfig() (*AgentConfig, error) {
 		PollInterval:   pollInterval,
 		Key:            key,
 		RateLimit:      rateLimit,
+		CryptoKey:      cryptoKey,
 	}, nil
 }

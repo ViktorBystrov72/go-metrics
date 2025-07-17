@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rsa"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -17,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ViktorBystrov72/go-metrics/internal/crypto"
 	"github.com/ViktorBystrov72/go-metrics/internal/models"
 	"github.com/ViktorBystrov72/go-metrics/internal/utils"
 	"github.com/shirou/gopsutil/v3/cpu"
@@ -295,15 +298,31 @@ type MetricsSender struct {
 	pool        Pool
 	address     string
 	key         string
+	publicKey   *rsa.PublicKey
 }
 
 // NewMetricsSender создаёт новый Sender с учётом конфига
 func NewMetricsSender(cfg *AgentConfig) Sender {
+	var publicKey *rsa.PublicKey
+
+	// Загружаем публичный ключ, если путь указан
+	if cfg.CryptoKey != "" {
+		var err error
+		publicKey, err = crypto.LoadPublicKey(cfg.CryptoKey)
+		if err != nil {
+			log.Printf("Ошибка загрузки публичного ключа: %v", err)
+			// Продолжаем работу без шифрования
+		} else {
+			log.Printf("Публичный ключ загружен из: %s", cfg.CryptoKey)
+		}
+	}
+
 	return &MetricsSender{
 		metricsChan: make(chan []models.Metrics, 100),
 		pool:        NewWorkerPool(cfg.RateLimit),
 		address:     fmt.Sprintf("http://%s", cfg.Address),
 		key:         cfg.Key,
+		publicKey:   publicKey,
 	}
 }
 
@@ -356,6 +375,7 @@ func (ms *MetricsSender) SendMetricsBatch(metrics []models.Metrics) error {
 		return fmt.Errorf("marshal error: %w", err)
 	}
 
+	// Сжимаем данные
 	buf := bufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	defer bufPool.Put(buf)
@@ -372,12 +392,32 @@ func (ms *MetricsSender) SendMetricsBatch(metrics []models.Metrics) error {
 		return fmt.Errorf("gzip close error: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, url, buf)
+	// Получаем сжатые данные
+	compressedData := buf.Bytes()
+	var finalData []byte
+	var contentEncoding string
+
+	// Шифруем данные, если есть публичный ключ
+	if ms.publicKey != nil {
+		encryptedData, err := crypto.EncryptLargeData(compressedData, ms.publicKey)
+		if err != nil {
+			return fmt.Errorf("encryption error: %w", err)
+		}
+
+		// Кодируем в Base64 для передачи
+		finalData = []byte(base64.StdEncoding.EncodeToString(encryptedData))
+		contentEncoding = "encrypted"
+	} else {
+		finalData = compressedData
+		contentEncoding = "gzip"
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(finalData))
 	if err != nil {
 		return fmt.Errorf("error creating request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Content-Encoding", "gzip")
+	req.Header.Set("Content-Encoding", contentEncoding)
 	req.Header.Set("Accept-Encoding", "gzip")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

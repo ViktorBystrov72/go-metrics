@@ -1,8 +1,11 @@
 package server
 
 import (
+	"crypto/rsa"
+	"log"
 	"net/http"
 
+	"github.com/ViktorBystrov72/go-metrics/internal/crypto"
 	"github.com/ViktorBystrov72/go-metrics/internal/logger"
 	"github.com/ViktorBystrov72/go-metrics/internal/middleware"
 	"github.com/ViktorBystrov72/go-metrics/internal/storage"
@@ -17,11 +20,26 @@ type Router struct {
 }
 
 // NewRouter создает новый роутер
-func NewRouter(storage storage.Storage, key string) *Router {
+func NewRouter(storage storage.Storage, key string, cryptoKeyPath string) *Router {
 	handlers := NewHandlers(storage, key)
 	router := chi.NewRouter()
 
+	var privateKey *rsa.PrivateKey
+
+	// Загружаем приватный ключ, если путь указан
+	if cryptoKeyPath != "" {
+		var err error
+		privateKey, err = crypto.LoadPrivateKey(cryptoKeyPath)
+		if err != nil {
+			log.Printf("Ошибка загрузки приватного ключа: %v", err)
+			// Продолжаем работу без дешифрования
+		} else {
+			log.Printf("Приватный ключ загружен из: %s", cryptoKeyPath)
+		}
+	}
+
 	// Middleware
+	router.Use(middleware.DecryptMiddleware(privateKey))
 	router.Use(middleware.GzipMiddleware)
 
 	// Маршруты для обновления метрик
