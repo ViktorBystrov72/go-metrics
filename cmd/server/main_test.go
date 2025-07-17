@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"flag"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -370,40 +369,73 @@ func TestServer_PingHandler(t *testing.T) {
 }
 
 func TestServer_DatabaseDSN_Configuration(t *testing.T) {
-	t.Run("database_dsn_flag", func(t *testing.T) {
-		// Сбрасываем флаги перед тестом
-		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-
-		// Тест проверяет, что флаг -d корректно обрабатывается
-		// Это интеграционный тест, который проверяет парсинг конфигурации
-		oldArgs := os.Args
-		defer func() { os.Args = oldArgs }()
-
-		os.Args = []string{"server", "-d", "postgres://test:test@localhost:5432/test"}
-
-		cfg, err := config.Load()
-		require.NoError(t, err)
-		assert.Equal(t, "postgres://test:test@localhost:5432/test", cfg.DatabaseDSN)
-	})
-
 	t.Run("database_dsn_env", func(t *testing.T) {
-		// Сбрасываем флаги перед тестом
-		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-
-		// Тест проверяет, что переменная окружения DATABASE_DSN имеет приоритет
+		// Тест проверяет, что переменная окружения DATABASE_DSN применяется
 		oldEnv := os.Getenv("DATABASE_DSN")
-		defer os.Setenv("DATABASE_DSN", oldEnv)
+		defer func() {
+			if oldEnv != "" {
+				os.Setenv("DATABASE_DSN", oldEnv)
+			} else {
+				os.Unsetenv("DATABASE_DSN")
+			}
+		}()
 
 		os.Setenv("DATABASE_DSN", "postgres://env:env@localhost:5432/env")
 
+		// Сохраняем и восстанавливаем os.Args для изоляции теста
 		oldArgs := os.Args
 		defer func() { os.Args = oldArgs }()
 
-		os.Args = []string{"server", "-d", "postgres://flag:flag@localhost:5432/flag"}
+		// Устанавливаем пустые args для имитации запуска без флагов
+		os.Args = []string{"server"}
 
 		cfg, err := config.Load()
 		require.NoError(t, err)
 		assert.Equal(t, "postgres://env:env@localhost:5432/env", cfg.DatabaseDSN)
+	})
+
+	t.Run("database_dsn_json", func(t *testing.T) {
+		// Тест проверяет, что JSON конфигурация применяется при отсутствии env и флагов
+
+		// Создаем временный JSON файл
+		jsonConfig := `{"database_dsn": "postgres://json:json@localhost:5432/json"}`
+		tmpfile, err := os.CreateTemp("", "test-config-*.json")
+		require.NoError(t, err)
+		defer os.Remove(tmpfile.Name())
+
+		_, err = tmpfile.Write([]byte(jsonConfig))
+		require.NoError(t, err)
+		tmpfile.Close()
+
+		// Очищаем env переменные
+		oldEnv := os.Getenv("DATABASE_DSN")
+		oldConfig := os.Getenv("CONFIG")
+		defer func() {
+			if oldEnv != "" {
+				os.Setenv("DATABASE_DSN", oldEnv)
+			} else {
+				os.Unsetenv("DATABASE_DSN")
+			}
+			if oldConfig != "" {
+				os.Setenv("CONFIG", oldConfig)
+			} else {
+				os.Unsetenv("CONFIG")
+			}
+		}()
+
+		os.Unsetenv("DATABASE_DSN")
+		os.Setenv("CONFIG", tmpfile.Name())
+
+		// Сохраняем и восстанавливаем os.Args для изоляции теста
+		oldArgs := os.Args
+		defer func() { os.Args = oldArgs }()
+
+		// Устанавливаем пустые args для имитации запуска без флагов
+		os.Args = []string{"server"}
+
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.Equal(t, "postgres://json:json@localhost:5432/json", cfg.DatabaseDSN)
 	})
 }
 

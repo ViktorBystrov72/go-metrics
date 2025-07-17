@@ -1,0 +1,8 @@
+{
+    "address": "0.0.0.0:8080",
+    "restore": false,
+    "store_interval": "5m",
+    "store_file": "/var/lib/metrics/data.json",
+    "database_dsn": "postgres://user:password@localhost/metrics?sslmode=disable",
+    "crypto_key": "/etc/ssl/private/metrics-server.pem"
+} 
