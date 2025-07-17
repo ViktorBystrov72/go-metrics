@@ -49,9 +49,9 @@ func (d *DatabaseStorage) Close() error {
 // UpdateGauge обновляет gauge метрику в базе данных
 func (d *DatabaseStorage) UpdateGauge(name string, value float64) {
 	query := `
-	INSERT INTO metrics (name, type, value) 
+	INSERT INTO metrics (name, type, value)
 	VALUES ($1, 'gauge', $2)
-	ON CONFLICT (name, type) 
+	ON CONFLICT (name, type)
 	DO UPDATE SET value = $2, created_at = CURRENT_TIMESTAMP
 	WHERE metrics.name = $1 AND metrics.type = 'gauge'
 	`
@@ -72,9 +72,9 @@ func (d *DatabaseStorage) UpdateGauge(name string, value float64) {
 // UpdateCounter обновляет counter метрику в базе данных
 func (d *DatabaseStorage) UpdateCounter(name string, value int64) {
 	query := `
-	INSERT INTO metrics (name, type, delta) 
+	INSERT INTO metrics (name, type, delta)
 	VALUES ($1, 'counter', $2)
-	ON CONFLICT (name, type) 
+	ON CONFLICT (name, type)
 	DO UPDATE SET delta = metrics.delta + $2, created_at = CURRENT_TIMESTAMP
 	WHERE metrics.name = $1 AND metrics.type = 'counter'
 	`
@@ -198,6 +198,7 @@ func (d *DatabaseStorage) IsAvailable() bool {
 
 // UpdateBatch обновляет множество метрик в базе данных
 func (d *DatabaseStorage) UpdateBatch(metrics []models.Metrics) error {
+	// Выход для пустого списка метрик
 	if len(metrics) == 0 {
 		return nil
 	}
@@ -215,30 +216,34 @@ func (d *DatabaseStorage) UpdateBatch(metrics []models.Metrics) error {
 		for _, metric := range metrics {
 			switch metric.MType {
 			case "gauge":
-				if metric.Value != nil {
-					_, err = tx.Exec(ctx, `
-						INSERT INTO metrics (name, type, value) 
-						VALUES ($1, 'gauge', $2)
-						ON CONFLICT (name, type) 
-						DO UPDATE SET value = $2, created_at = CURRENT_TIMESTAMP
-						WHERE metrics.name = $1 AND metrics.type = 'gauge'
-					`, metric.ID, *metric.Value)
-					if err != nil {
-						return fmt.Errorf("failed to update gauge metric %s: %w", metric.ID, err)
-					}
+				// Выход, если значение gauge не задано
+				if metric.Value == nil {
+					continue
+				}
+				_, err = tx.Exec(ctx, `
+					INSERT INTO metrics (name, type, value)
+					VALUES ($1, 'gauge', $2)
+					ON CONFLICT (name, type)
+					DO UPDATE SET value = $2, created_at = CURRENT_TIMESTAMP
+					WHERE metrics.name = $1 AND metrics.type = 'gauge'
+				`, metric.ID, *metric.Value)
+				if err != nil {
+					return fmt.Errorf("failed to update gauge metric %s: %w", metric.ID, err)
 				}
 			case "counter":
-				if metric.Delta != nil {
-					_, err = tx.Exec(ctx, `
-						INSERT INTO metrics (name, type, delta) 
-						VALUES ($1, 'counter', $2)
-						ON CONFLICT (name, type) 
-						DO UPDATE SET delta = metrics.delta + $2, created_at = CURRENT_TIMESTAMP
-						WHERE metrics.name = $1 AND metrics.type = 'counter'
-					`, metric.ID, *metric.Delta)
-					if err != nil {
-						return fmt.Errorf("failed to update counter metric %s: %w", metric.ID, err)
-					}
+				// Выход, если дельта counter не задана
+				if metric.Delta == nil {
+					continue
+				}
+				_, err = tx.Exec(ctx, `
+					INSERT INTO metrics (name, type, delta)
+					VALUES ($1, 'counter', $2)
+					ON CONFLICT (name, type)
+					DO UPDATE SET delta = metrics.delta + $2, created_at = CURRENT_TIMESTAMP
+					WHERE metrics.name = $1 AND metrics.type = 'counter'
+				`, metric.ID, *metric.Delta)
+				if err != nil {
+					return fmt.Errorf("failed to update counter metric %s: %w", metric.ID, err)
 				}
 			default:
 				return fmt.Errorf("unknown metric type: %s", metric.MType)

@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"github.com/ViktorBystrov72/go-metrics/internal/models"
 	"github.com/ViktorBystrov72/go-metrics/internal/storage"
 	"github.com/ViktorBystrov72/go-metrics/internal/utils"
+	"github.com/go-chi/chi/v5"
 )
 
 // ExampleHandlers_UpdateHandler демонстрирует обновление gauge метрики через URL параметры.
@@ -20,6 +22,13 @@ func ExampleHandlers_UpdateHandler() {
 
 	// Создаем тестовый запрос для обновления gauge метрики
 	req := httptest.NewRequest("POST", "/update/gauge/testMetric/123.45", nil)
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, &chi.Context{
+		URLParams: chi.RouteParams{
+			Keys:   []string{"type", "name", "value"},
+			Values: []string{"gauge", "testMetric", "123.45"},
+		},
+	})
+	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
 	// Выполняем запрос
@@ -44,6 +53,13 @@ func ExampleHandlers_ValueHandler() {
 
 	// Создаем тестовый запрос для получения значения
 	req := httptest.NewRequest("GET", "/value/gauge/testMetric", nil)
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, &chi.Context{
+		URLParams: chi.RouteParams{
+			Keys:   []string{"type", "name"},
+			Values: []string{"gauge", "testMetric"},
+		},
+	})
+	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
 	// Выполняем запрос
@@ -213,12 +229,20 @@ func ExampleHandlers_UpdateHandler_withHash() {
 	handlers := NewHandlers(storage, "test-key")
 
 	// Создаем тестовый запрос для обновления counter метрики
-	req := httptest.NewRequest("POST", "/update/counter/testCounter/10", nil)
+	req := httptest.NewRequest("POST", "/update/counter/testCounter/10", bytes.NewReader([]byte("testCounter:counter:10")))
 
 	// Вычисляем хеш для проверки целостности
 	data := []byte("testCounter:counter:10")
 	hash := utils.CalculateHash(data, "test-key")
 	req.Header.Set("HashSHA256", hash)
+
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, &chi.Context{
+		URLParams: chi.RouteParams{
+			Keys:   []string{"type", "name", "value"},
+			Values: []string{"counter", "testCounter", "10"},
+		},
+	})
+	req = req.WithContext(ctx)
 
 	w := httptest.NewRecorder()
 

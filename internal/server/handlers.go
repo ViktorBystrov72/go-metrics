@@ -110,8 +110,10 @@ func (h *Handlers) checkJSONHash(r *http.Request) bool {
 	if headerHash == "" {
 		headerHash = r.Header.Get("Hash")
 	}
+
+	// Выход для специального значения "none"
 	if headerHash == "none" {
-		return true // специальное значение означает пропуск проверки хеша
+		return true
 	}
 
 	// Парсим JSON чтобы получить хеш
@@ -120,49 +122,49 @@ func (h *Handlers) checkJSONHash(r *http.Request) bool {
 		return false
 	}
 
-	// Если хеш не передан ни в заголовке, ни в теле, пропускаем проверку
+	// Выход, если хеш не передан ни в заголовке, ни в теле
 	if m.Hash == "" && headerHash == "" {
 		return true
 	}
 
-	// Если хеш пришел в заголовке, проверяем его от всего JSON тела
+	// Выход для проверки хеша из заголовка
 	if headerHash != "" {
 		return utils.VerifyHash(body, h.key, headerHash)
 	}
 
-	// Если хеш пришел в JSON теле, проверяем его от строки name:type:value
-	if m.Hash != "" {
-		// Вычисляем ожидаемый хеш
-		var data string
-		switch m.MType {
-		case "counter":
-			if m.Delta == nil {
-				return false
-			}
-			data = fmt.Sprintf("%s:%s:%d", m.ID, m.MType, *m.Delta)
-		case "gauge":
-			if m.Value == nil {
-				return false
-			}
-			data = fmt.Sprintf("%s:%s:%f", m.ID, m.MType, *m.Value)
-		default:
-			return false
-		}
-
-		return utils.VerifyHash([]byte(data), h.key, m.Hash)
+	// Выход, если хеш не передан в JSON теле
+	if m.Hash == "" {
+		return false
 	}
 
-	return false
+	// Вычисляем ожидаемый хеш для JSON тела
+	var data string
+	switch m.MType {
+	case "counter":
+		if m.Delta == nil {
+			return false
+		}
+		data = fmt.Sprintf("%s:%s:%d", m.ID, m.MType, *m.Delta)
+	case "gauge":
+		if m.Value == nil {
+			return false
+		}
+		data = fmt.Sprintf("%s:%s:%f", m.ID, m.MType, *m.Value)
+	default:
+		return false
+	}
+
+	return utils.VerifyHash([]byte(data), h.key, m.Hash)
 }
 
 // verifyMetricHash проверяет хеш отдельной метрики
 func (h *Handlers) verifyMetricHash(m models.Metrics) bool {
-	// Если ключ не задан, проверка не требуется
+	// Если ключ не задан
 	if h.key == "" {
 		return true
 	}
 
-	// Если хеш не передан, это ошибка
+	// Если хеш не передан
 	if m.Hash == "" {
 		log.Printf("No hash provided for metric: %s, type: %s", m.ID, m.MType)
 		return false

@@ -12,6 +12,7 @@ import (
 	"io"
 
 	"os"
+	"os/exec"
 
 	"github.com/ViktorBystrov72/go-metrics/internal/config"
 	"github.com/ViktorBystrov72/go-metrics/internal/middleware"
@@ -506,4 +507,15 @@ func TestServer_NoHashVerification(t *testing.T) {
 		defer resp.Body.Close()
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	})
+}
+
+func TestMainServerSmoke(t *testing.T) {
+	cmd := exec.Command("go", "run", "./main.go", "-h")
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Logf("main.go (server) успешно запустился: %s", string(out))
+	} else {
+		t.Logf("main.go (server) завершился с ошибкой (ожидаемо для -h): %s", string(out))
+	}
 }

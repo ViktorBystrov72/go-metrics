@@ -251,3 +251,176 @@ func TestRetryWithBackoff(t *testing.T) {
 		t.Errorf("Expected 3 attempts, got %d", attempts)
 	}
 }
+
+// TestRetryWithContextCancellation тестирует retry с отменой контекста.
+func TestRetryWithContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	attempts := 0
+	err := Retry(ctx, DefaultRetryConfig(), func() error {
+		attempts++
+		if attempts == 2 {
+			cancel() // Отменяем контекст
+		}
+		return errors.New("test error")
+	})
+
+	if err == nil {
+		t.Error("Ожидалась ошибка при отмене контекста")
+	}
+
+	if attempts < 1 {
+		t.Errorf("Ожидалась хотя бы 1 попытка, выполнено %d", attempts)
+	}
+}
+
+// TestRetryWithImmediateSuccess тестирует retry с немедленным успехом.
+func TestRetryWithImmediateSuccess(t *testing.T) {
+	ctx := context.Background()
+	attempts := 0
+
+	err := Retry(ctx, DefaultRetryConfig(), func() error {
+		attempts++
+		return nil // Успех с первой попытки
+	})
+
+	if err != nil {
+		t.Errorf("Не ожидалась ошибка: %v", err)
+	}
+
+	if attempts != 1 {
+		t.Errorf("Ожидалась 1 попытка, выполнено %d", attempts)
+	}
+}
+
+// TestRetryWithBackoffSuccess тестирует retry с backoff и успехом.
+func TestRetryWithBackoffSuccess(t *testing.T) {
+	ctx := context.Background()
+	attempts := 0
+
+	err := RetryWithBackoff(ctx, 3, 100*time.Millisecond, func() error {
+		attempts++
+		if attempts < 3 {
+			return errors.New("temporary error")
+		}
+		return nil // Успех на третьей попытке
+	})
+
+	if err != nil {
+		t.Errorf("Не ожидалась ошибка: %v", err)
+	}
+
+	if attempts != 3 {
+		t.Errorf("Ожидалось 3 попытки, выполнено %d", attempts)
+	}
+}
+
+// TestRetryWithBackoffMaxAttempts тестирует retry с backoff и максимальным количеством попыток.
+func TestRetryWithBackoffMaxAttempts(t *testing.T) {
+	ctx := context.Background()
+
+	attempts := 0
+	err := RetryWithBackoff(ctx, 2, 100*time.Millisecond, func() error {
+		attempts++
+		return errors.New("persistent error")
+	})
+
+	if err == nil {
+		t.Error("Ожидалась ошибка после максимального количества попыток")
+	}
+
+	if attempts < 1 {
+		t.Errorf("Ожидалась хотя бы 1 попытка, выполнено %d", attempts)
+	}
+}
+
+// TestRetryWithBackoffContextCancellation тестирует retry с backoff и отменой контекста.
+func TestRetryWithBackoffContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	attempts := 0
+	err := RetryWithBackoff(ctx, 5, 100*time.Millisecond, func() error {
+		attempts++
+		if attempts == 2 {
+			cancel() // Отменяем контекст
+		}
+		return errors.New("test error")
+	})
+
+	if err == nil {
+		t.Error("Ожидалась ошибка при отмене контекста")
+	}
+
+	if attempts < 1 {
+		t.Errorf("Ожидалась хотя бы 1 попытка, выполнено %d", attempts)
+	}
+}
+
+// TestIsRetriableErrorWithNil тестирует IsRetriableError с nil ошибкой.
+func TestIsRetriableErrorWithNil(t *testing.T) {
+	if IsRetriableError(nil) {
+		t.Error("nil ошибка не должна быть retriable")
+	}
+}
+
+// TestIsRetriableErrorWithNonRetriable тестирует IsRetriableError с не-retriable ошибкой.
+func TestIsRetriableErrorWithNonRetriable(t *testing.T) {
+	err := errors.New("permanent error")
+	if IsRetriableError(err) {
+		t.Error("Постоянная ошибка не должна быть retriable")
+	}
+}
+
+// TestRetryConfigValidation тестирует валидацию конфигурации retry.
+func TestRetryConfigValidation(t *testing.T) {
+	config := DefaultRetryConfig()
+
+	if config.MaxAttempts <= 0 {
+		t.Error("MaxAttempts должен быть больше 0")
+	}
+
+	if len(config.Delays) == 0 {
+		t.Error("Delays не должен быть пустым")
+	}
+}
+
+// TestRetryWithZeroMaxAttempts тестирует retry с нулевым MaxAttempts.
+func TestRetryWithZeroMaxAttempts(t *testing.T) {
+	ctx := context.Background()
+	config := DefaultRetryConfig()
+	config.MaxAttempts = 0
+
+	attempts := 0
+	err := Retry(ctx, config, func() error {
+		attempts++
+		return errors.New("test error")
+	})
+
+	// При нулевом MaxAttempts функция должна вернуть nil (не выполнять попытки)
+	if err != nil {
+		t.Errorf("При нулевом MaxAttempts функция должна вернуть nil, получено: %v", err)
+	}
+
+	// Проверяем, что попыток не было
+	if attempts != 0 {
+		t.Errorf("При нулевом MaxAttempts не должно быть попыток, выполнено %d", attempts)
+	}
+}
+
+// TestRetryWithBackoffZeroMaxAttempts тестирует retry с backoff и нулевым MaxAttempts.
+func TestRetryWithBackoffZeroMaxAttempts(t *testing.T) {
+	ctx := context.Background()
+
+	attempts := 0
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("Ожидалась паника при нулевом MaxAttempts")
+		}
+	}()
+	_ = RetryWithBackoff(ctx, 0, 100*time.Millisecond, func() error {
+		attempts++
+		return errors.New("test error")
+	})
+}
