@@ -1,0 +1,6 @@
+{
+    "address": "metrics-server.company.com:8080",
+    "report_interval": "30s",
+    "poll_interval": "5s",
+    "crypto_key": "/etc/ssl/certs/metrics-agent.pem"
+} 
