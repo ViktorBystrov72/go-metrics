@@ -63,17 +63,38 @@ func (a *App) Run(ctx context.Context) error {
 	sig := <-sigChan
 	log.Printf("Получен сигнал %v, выполняем graceful shutdown...", sig)
 
-	// 1. Сначала останавливаем сбор метрик
-	log.Printf("Остановка сбора метрик...")
-	a.collector.Stop()
+	// Создаем контекст с таймаутом для graceful shutdown
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
 
-	// 2. Ждем завершения передачи всех собранных метрик
-	log.Printf("Ожидание завершения передачи метрик...")
-	transferWg.Wait()
+	// Канал для сигнализации о завершении shutdown
+	shutdownDone := make(chan struct{})
 
-	// 3. Останавливаем отправителя
-	log.Printf("Остановка отправки метрик...")
-	a.sender.Stop()
+	go func() {
+		defer close(shutdownDone)
+
+		// 1. Сначала останавливаем сбор метрик
+		log.Printf("Остановка сбора метрик...")
+		a.collector.Stop()
+
+		// 2. Ждем завершения передачи всех собранных метрик
+		log.Printf("Ожидание завершения передачи метрик...")
+		transferWg.Wait()
+
+		// 3. Останавливаем отправителя
+		log.Printf("Остановка отправки метрик...")
+		a.sender.Stop()
+	}()
+
+	// Ждем либо завершения shutdown, либо таймаута
+	select {
+	case <-shutdownDone:
+		log.Println("Agent stopped gracefully")
+	case <-shutdownCtx.Done():
+		log.Printf("Graceful shutdown timeout exceeded, forcing shutdown...")
+		// При таймауте принудительно завершаем
+		// Компоненты должны реагировать на отмену контекста
+	}
 
 	log.Println("Agent stopped")
 	return nil
@@ -134,9 +155,21 @@ func (mc *MetricsCollector) Start(ctx context.Context) {
 
 // Stop останавливает сбор метрик
 func (mc *MetricsCollector) Stop() {
-	// Отменяем контекст, чтобы остановить горутины сбора
 	mc.cancel()
-	mc.wg.Wait()
+
+	// Ждем завершения горутин с таймаутом
+	done := make(chan struct{})
+	go func() {
+		mc.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		log.Printf("MetricsCollector.Stop() timeout exceeded, some goroutines may not have finished")
+	}
+
 	close(mc.metricsChan)
 }
 
@@ -314,7 +347,19 @@ func (wp *WorkerPool) Submit(task Task) {
 }
 
 func (wp *WorkerPool) Stop() {
-	wp.wg.Wait()
+	// Ждем завершения воркеров с таймаутом
+	done := make(chan struct{})
+	go func() {
+		wp.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		log.Printf("WorkerPool.Stop() timeout exceeded, some workers may not have finished")
+	}
+
 	close(wp.tasks)
 }
 
@@ -374,7 +419,19 @@ func (ms *MetricsSender) Start(ctx context.Context) {
 func (ms *MetricsSender) Stop() {
 	// Отменяем контекст, чтобы остановить WorkerPool
 	ms.cancel()
-	ms.pool.Stop()
+
+	done := make(chan struct{})
+	go func() {
+		ms.pool.Stop()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		log.Printf("MetricsSender.Stop() timeout exceeded, WorkerPool may not have stopped completely")
+	}
+
 	close(ms.metricsChan)
 }
 
