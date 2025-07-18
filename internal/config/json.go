@@ -23,6 +23,7 @@ type ServerJSONConfig struct {
 	StoreFile     *string `json:"store_file,omitempty"`
 	DatabaseDSN   *string `json:"database_dsn,omitempty"`
 	CryptoKey     *string `json:"crypto_key,omitempty"`
+	TrustedSubnet *string `json:"trusted_subnet,omitempty"`
 }
 
 // LoadJSONFile загружает и парсит JSON файл конфигурации
@@ -111,5 +112,8 @@ func (jsonCfg *ServerJSONConfig) ApplyToServerConfig(cfg *ServerJSONConfig) {
 	}
 	if cfg.CryptoKey == nil && jsonCfg.CryptoKey != nil {
 		cfg.CryptoKey = jsonCfg.CryptoKey
+	}
+	if cfg.TrustedSubnet == nil && jsonCfg.TrustedSubnet != nil {
+		cfg.TrustedSubnet = jsonCfg.TrustedSubnet
 	}
 }

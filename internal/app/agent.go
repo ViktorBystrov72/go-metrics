@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -451,6 +452,19 @@ var gzipPool = sync.Pool{
 	},
 }
 
+// getHostIP возвращает IP-адрес хоста для заголовка X-Real-IP
+func getHostIP() string {
+	// Пытаемся подключиться к внешнему адресу для определения локального IP
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return "127.0.0.1"
+	}
+	defer conn.Close()
+
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP.String()
+}
+
 // SendMetricsBatch отправляет множество метрик одним запросом
 func (ms *MetricsSender) SendMetricsBatch(metrics []models.Metrics) error {
 	if len(metrics) == 0 {
@@ -511,6 +525,7 @@ func (ms *MetricsSender) SendMetricsBatch(metrics []models.Metrics) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", contentEncoding)
 	req.Header.Set("Accept-Encoding", "gzip")
+	req.Header.Set("X-Real-IP", getHostIP())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
