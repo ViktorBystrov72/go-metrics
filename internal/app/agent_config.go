@@ -18,115 +18,123 @@ type AgentConfig struct {
 	CryptoKey      string
 }
 
-func ParseAgentConfig() (*AgentConfig, error) {
-	var (
-		address        string
-		reportInterval int
-		pollInterval   int
-		key            string
-		rateLimit      int
-		cryptoKey      string
-		configFile     string
-	)
+type flagValues struct {
+	address        string
+	reportInterval int
+	pollInterval   int
+	key            string
+	rateLimit      int
+	cryptoKey      string
+	configFile     string
+}
 
-	// Создаем отдельный FlagSet чтобы избежать конфликтов с глобальными флагами
+func parseFlags() (*flagValues, error) {
+	flags := &flagValues{}
+
 	fs := flag.NewFlagSet("agent", flag.ContinueOnError)
-	fs.StringVar(&address, "a", "localhost:8080", "address and port to run server")
-	fs.IntVar(&reportInterval, "r", 10, "report interval in seconds")
-	fs.IntVar(&pollInterval, "p", 2, "poll interval in seconds")
-	fs.StringVar(&key, "k", "", "signature key")
-	fs.IntVar(&rateLimit, "l", 1, "rate limit for concurrent requests")
-	fs.StringVar(&cryptoKey, "crypto-key", "", "path to public key file for encryption")
-	fs.StringVar(&configFile, "c", "", "config file path")
-	fs.StringVar(&configFile, "config", "", "config file path") // альтернативный флаг
+	fs.StringVar(&flags.address, "a", "localhost:8080", "address and port to run server")
+	fs.IntVar(&flags.reportInterval, "r", 10, "report interval in seconds")
+	fs.IntVar(&flags.pollInterval, "p", 2, "poll interval in seconds")
+	fs.StringVar(&flags.key, "k", "", "signature key")
+	fs.IntVar(&flags.rateLimit, "l", 1, "rate limit for concurrent requests")
+	fs.StringVar(&flags.cryptoKey, "crypto-key", "", "path to public key file for encryption")
+	fs.StringVar(&flags.configFile, "c", "", "config file path")
+	fs.StringVar(&flags.configFile, "config", "", "config file path")
 
 	// Парсим флаги только если это не тестовое окружение
-	// В тестах os.Args[0] обычно заканчивается на ".test"
 	isTest := len(os.Args) > 0 && (os.Args[0] == "test" ||
 		len(os.Args[0]) > 5 && os.Args[0][len(os.Args[0])-5:] == ".test")
 
 	if !isTest && len(os.Args) > 1 {
-		err := fs.Parse(os.Args[1:])
-		if err != nil {
+		if err := fs.Parse(os.Args[1:]); err != nil {
 			return nil, fmt.Errorf("ошибка парсинга флагов: %w", err)
 		}
 	}
 
-	// Создаем промежуточную структуру для сбора значений из разных источников
+	return flags, nil
+}
+
+func loadJSONConfig(configFile string) (*config.AgentJSONConfig, error) {
 	jsonConfig := &config.AgentJSONConfig{}
 
-	// 1. Сначала загружаем JSON конфигурацию (наименьший приоритет)
 	if configFile == "" {
 		configFile = os.Getenv("CONFIG")
 	}
 
 	if configFile != "" {
-		err := config.LoadJSONFile(configFile, jsonConfig)
-		if err != nil {
+		if err := config.LoadJSONFile(configFile, jsonConfig); err != nil {
 			return nil, fmt.Errorf("ошибка загрузки JSON конфигурации: %w", err)
 		}
 	}
 
-	// 2. Применяем переменные окружения (средний приоритет)
+	return jsonConfig, nil
+}
+
+func applyEnvironmentVariables(jsonConfig *config.AgentJSONConfig, flags *flagValues) error {
 	if env := os.Getenv("ADDRESS"); env != "" {
 		jsonConfig.Address = stringPtr(env)
 	}
+
 	if env := os.Getenv("REPORT_INTERVAL"); env != "" {
-		// Если это число без единицы, добавляем "s" (секунды для обратной совместимости)
 		if _, err := strconv.Atoi(env); err == nil {
 			jsonConfig.ReportInterval = stringPtr(env + "s")
 		} else {
 			jsonConfig.ReportInterval = stringPtr(env)
 		}
 	}
+
 	if env := os.Getenv("POLL_INTERVAL"); env != "" {
-		// Если это число без единицы, добавляем "s"
 		if _, err := strconv.Atoi(env); err == nil {
 			jsonConfig.PollInterval = stringPtr(env + "s")
 		} else {
 			jsonConfig.PollInterval = stringPtr(env)
 		}
 	}
+
 	if env := os.Getenv("CRYPTO_KEY"); env != "" {
 		jsonConfig.CryptoKey = stringPtr(env)
 	}
 
-	// KEY и RATE_LIMIT не поддерживаются в JSON, применяем сразу
+	// KEY и RATE_LIMIT не поддерживаются в JSON, применяем к флагам
 	if env := os.Getenv("KEY"); env != "" {
-		key = env
+		flags.key = env
 	}
+
 	if env := os.Getenv("RATE_LIMIT"); env != "" {
 		if v, err := strconv.Atoi(env); err == nil && v > 0 {
-			rateLimit = v
+			flags.rateLimit = v
 		} else {
-			return nil, fmt.Errorf("invalid RATE_LIMIT: %v", env)
+			return fmt.Errorf("invalid RATE_LIMIT: %v", env)
 		}
 	}
 
-	// 3. Применяем флаги (наивысший приоритет)
+	return nil
+}
+
+func applyFlags(flags *flagValues) *config.AgentJSONConfig {
 	finalConfig := &config.AgentJSONConfig{}
 
 	// Если флаг был изменен от дефолта, используем его
-	if address != "localhost:8080" {
-		finalConfig.Address = stringPtr(address)
+	if flags.address != "localhost:8080" {
+		finalConfig.Address = stringPtr(flags.address)
 	}
-	if reportInterval != 10 {
-		finalConfig.ReportInterval = stringPtr(fmt.Sprintf("%ds", reportInterval))
+	if flags.reportInterval != 10 {
+		finalConfig.ReportInterval = stringPtr(fmt.Sprintf("%ds", flags.reportInterval))
 	}
-	if pollInterval != 2 {
-		finalConfig.PollInterval = stringPtr(fmt.Sprintf("%ds", pollInterval))
+	if flags.pollInterval != 2 {
+		finalConfig.PollInterval = stringPtr(fmt.Sprintf("%ds", flags.pollInterval))
 	}
-	if cryptoKey != "" {
-		finalConfig.CryptoKey = stringPtr(cryptoKey)
+	if flags.cryptoKey != "" {
+		finalConfig.CryptoKey = stringPtr(flags.cryptoKey)
 	}
 
-	// Применяем JSON конфигурацию для незаданных значений
-	jsonConfig.ApplyToAgentConfig(finalConfig)
+	return finalConfig
+}
 
-	// Конвертируем обратно в финальную структуру AgentConfig
+func buildFinalConfig(finalConfig *config.AgentJSONConfig, flags *flagValues) (*AgentConfig, error) {
 	result := &AgentConfig{
-		Key:       key,       // KEY не поддерживается в JSON
-		RateLimit: rateLimit, // RATE_LIMIT не поддерживается в JSON
+		Key:       flags.key,
+		RateLimit: flags.rateLimit,
 	}
 
 	// Обрабатываем значения с дефолтами
@@ -160,15 +168,55 @@ func ParseAgentConfig() (*AgentConfig, error) {
 		result.CryptoKey = *finalConfig.CryptoKey
 	}
 
-	// Проверяем ограничения
-	if result.ReportInterval <= 0 {
-		return nil, fmt.Errorf("REPORT_INTERVAL должен быть больше 0")
+	return result, nil
+}
+
+func validateConfig(cfg *AgentConfig) error {
+	if cfg.ReportInterval <= 0 {
+		return fmt.Errorf("REPORT_INTERVAL должен быть больше 0")
 	}
-	if result.PollInterval <= 0 {
-		return nil, fmt.Errorf("POLL_INTERVAL должен быть больше 0")
+	if cfg.PollInterval <= 0 {
+		return fmt.Errorf("POLL_INTERVAL должен быть больше 0")
 	}
-	if result.RateLimit <= 0 {
-		return nil, fmt.Errorf("RATE_LIMIT должен быть больше 0")
+	if cfg.RateLimit <= 0 {
+		return fmt.Errorf("RATE_LIMIT должен быть больше 0")
+	}
+	return nil
+}
+
+func ParseAgentConfig() (*AgentConfig, error) {
+	// 1. Парсим флаги командной строки
+	flags, err := parseFlags()
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. Загружаем JSON конфигурацию (наименьший приоритет)
+	jsonConfig, err := loadJSONConfig(flags.configFile)
+	if err != nil {
+		return nil, err
+	}
+
+	// 3. Применяем переменные окружения (средний приоритет)
+	if err := applyEnvironmentVariables(jsonConfig, flags); err != nil {
+		return nil, err
+	}
+
+	// 4. Применяем флаги (наивысший приоритет)
+	finalConfig := applyFlags(flags)
+
+	// 5. Применяем JSON конфигурацию для незаданных значений
+	jsonConfig.ApplyToAgentConfig(finalConfig)
+
+	// 6. Строим финальную конфигурацию
+	result, err := buildFinalConfig(finalConfig, flags)
+	if err != nil {
+		return nil, err
+	}
+
+	// 7. Валидируем конфигурацию
+	if err := validateConfig(result); err != nil {
+		return nil, err
 	}
 
 	return result, nil

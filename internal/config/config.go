@@ -18,62 +18,65 @@ type Config struct {
 	CryptoKey       string
 }
 
-// Load загружает конфигурацию из флагов, переменных окружения и JSON файла
-func Load() (*Config, error) {
-	var (
-		flagRunAddr         string
-		flagStoreInterval   int
-		flagFileStoragePath string
-		flagRestore         bool
-		flagDatabaseDSN     string
-		flagKey             string
-		flagCryptoKey       string
-		flagConfigFile      string
-	)
+type serverFlagValues struct {
+	runAddr         string
+	storeInterval   int
+	fileStoragePath string
+	restore         bool
+	databaseDSN     string
+	key             string
+	cryptoKey       string
+	configFile      string
+}
 
-	// Создаем отдельный FlagSet чтобы избежать конфликтов с глобальными флагами
+func parseServerFlags() (*serverFlagValues, error) {
+	flags := &serverFlagValues{}
+
 	fs := flag.NewFlagSet("server", flag.ContinueOnError)
-	fs.StringVar(&flagRunAddr, "a", "localhost:8080", "address and port to run server")
-	fs.IntVar(&flagStoreInterval, "i", 300, "store interval in seconds")
-	fs.StringVar(&flagFileStoragePath, "f", "/tmp/metrics-db.json", "file storage path")
-	fs.BoolVar(&flagRestore, "r", true, "restore from file on start")
-	fs.StringVar(&flagDatabaseDSN, "d", "", "database DSN")
-	fs.StringVar(&flagKey, "k", "", "signature key")
-	fs.StringVar(&flagCryptoKey, "crypto-key", "", "path to private key file for decryption")
-	fs.StringVar(&flagConfigFile, "c", "", "config file path")
-	fs.StringVar(&flagConfigFile, "config", "", "config file path") // альтернативный флаг
+	fs.StringVar(&flags.runAddr, "a", "localhost:8080", "address and port to run server")
+	fs.IntVar(&flags.storeInterval, "i", 300, "store interval in seconds")
+	fs.StringVar(&flags.fileStoragePath, "f", "/tmp/metrics-db.json", "file storage path")
+	fs.BoolVar(&flags.restore, "r", true, "restore from file on start")
+	fs.StringVar(&flags.databaseDSN, "d", "", "database DSN")
+	fs.StringVar(&flags.key, "k", "", "signature key")
+	fs.StringVar(&flags.cryptoKey, "crypto-key", "", "path to private key file for decryption")
+	fs.StringVar(&flags.configFile, "c", "", "config file path")
+	fs.StringVar(&flags.configFile, "config", "", "config file path")
 
 	// Парсим флаги только если это не тестовое окружение
-	// В тестах os.Args[0] обычно заканчивается на ".test"
 	isTest := len(os.Args) > 0 && (os.Args[0] == "test" ||
 		len(os.Args[0]) > 5 && os.Args[0][len(os.Args[0])-5:] == ".test")
 
 	if !isTest && len(os.Args) > 1 {
-		err := fs.Parse(os.Args[1:])
-		if err != nil {
+		if err := fs.Parse(os.Args[1:]); err != nil {
 			return nil, fmt.Errorf("ошибка парсинга флагов: %w", err)
 		}
 	}
 
+	return flags, nil
+}
+
+func loadServerJSONConfig(configFile string) (*ServerJSONConfig, error) {
 	jsonConfig := &ServerJSONConfig{}
 
-	// 1. Сначала загружаем JSON конфигурацию (наименьший приоритет)
-	configFile := flagConfigFile
 	if configFile == "" {
 		configFile = os.Getenv("CONFIG")
 	}
 
 	if configFile != "" {
-		err := LoadJSONFile(configFile, jsonConfig)
-		if err != nil {
+		if err := LoadJSONFile(configFile, jsonConfig); err != nil {
 			return nil, fmt.Errorf("ошибка загрузки JSON конфигурации: %w", err)
 		}
 	}
 
-	// 2. Применяем переменные окружения (средний приоритет)
+	return jsonConfig, nil
+}
+
+func applyServerEnvironmentVariables(jsonConfig *ServerJSONConfig, flags *serverFlagValues) {
 	if envRunAddr := os.Getenv("ADDRESS"); envRunAddr != "" {
 		jsonConfig.Address = stringPtr(envRunAddr)
 	}
+
 	if envStoreInterval := os.Getenv("STORE_INTERVAL"); envStoreInterval != "" {
 		// Если это число без единицы, добавляем "s" (секунды для обратной совместимости)
 		if _, err := strconv.Atoi(envStoreInterval); err == nil {
@@ -82,9 +85,11 @@ func Load() (*Config, error) {
 			jsonConfig.StoreInterval = stringPtr(envStoreInterval)
 		}
 	}
+
 	if envFileStoragePath := os.Getenv("FILE_STORAGE_PATH"); envFileStoragePath != "" {
 		jsonConfig.StoreFile = stringPtr(envFileStoragePath)
 	}
+
 	if envRestore := os.Getenv("RESTORE"); envRestore != "" {
 		if envRestore == "true" || envRestore == "1" {
 			jsonConfig.Restore = boolPtr(true)
@@ -92,58 +97,57 @@ func Load() (*Config, error) {
 			jsonConfig.Restore = boolPtr(false)
 		}
 	}
+
 	if envDatabaseDSN := os.Getenv("DATABASE_DSN"); envDatabaseDSN != "" {
 		jsonConfig.DatabaseDSN = stringPtr(envDatabaseDSN)
 	}
+
 	if envKey := os.Getenv("KEY"); envKey != "" {
-		// KEY не поддерживается в JSON, применяем сразу
-		flagKey = envKey
+		// KEY не поддерживается в JSON, применяем к флагам
+		flags.key = envKey
 	}
+
 	if envCryptoKey := os.Getenv("CRYPTO_KEY"); envCryptoKey != "" {
 		jsonConfig.CryptoKey = stringPtr(envCryptoKey)
 	}
+}
 
-	// 3. Применяем флаги (наивысший приоритет)
+func applyServerFlags(flags *serverFlagValues) *ServerJSONConfig {
 	finalConfig := &ServerJSONConfig{}
 
 	// Если флаг был изменен от дефолта, используем его
-	if flagRunAddr != "localhost:8080" {
-		finalConfig.Address = stringPtr(flagRunAddr)
+	if flags.runAddr != "localhost:8080" {
+		finalConfig.Address = stringPtr(flags.runAddr)
 	}
-	if flagStoreInterval != 300 {
-		finalConfig.StoreInterval = stringPtr(fmt.Sprintf("%ds", flagStoreInterval))
+	if flags.storeInterval != 300 {
+		finalConfig.StoreInterval = stringPtr(fmt.Sprintf("%ds", flags.storeInterval))
 	}
-	if flagFileStoragePath != "/tmp/metrics-db.json" {
-		finalConfig.StoreFile = stringPtr(flagFileStoragePath)
+	if flags.fileStoragePath != "/tmp/metrics-db.json" {
+		finalConfig.StoreFile = stringPtr(flags.fileStoragePath)
 	}
 
-	// Для restore нужно проверить, был ли флаг явно установлен
-
-	// Если есть env переменная, используем её приоритет
+	// Обработка restore флага
 	if envRestore := os.Getenv("RESTORE"); envRestore != "" {
-		// Env переменная установлена, используем её значение
 		if envRestore == "true" || envRestore == "1" {
 			finalConfig.Restore = boolPtr(true)
 		} else if envRestore == "false" || envRestore == "0" {
 			finalConfig.Restore = boolPtr(false)
 		}
 	}
-	// Если нет env переменной, оставляем finalConfig.Restore = nil
-	// JSON конфигурация сможет примениться в ApplyToServerConfig
 
-	if flagDatabaseDSN != "" {
-		finalConfig.DatabaseDSN = stringPtr(flagDatabaseDSN)
+	if flags.databaseDSN != "" {
+		finalConfig.DatabaseDSN = stringPtr(flags.databaseDSN)
 	}
-	if flagCryptoKey != "" {
-		finalConfig.CryptoKey = stringPtr(flagCryptoKey)
+	if flags.cryptoKey != "" {
+		finalConfig.CryptoKey = stringPtr(flags.cryptoKey)
 	}
 
-	// Применяем JSON конфигурацию для незаданных значений
-	jsonConfig.ApplyToServerConfig(finalConfig)
+	return finalConfig
+}
 
-	// Конвертируем обратно в финальную структуру Config
+func buildServerConfig(finalConfig *ServerJSONConfig, flags *serverFlagValues) (*Config, error) {
 	result := &Config{
-		Key: flagKey, // KEY не поддерживается в JSON
+		Key: flags.key, // KEY не поддерживается в JSON
 	}
 
 	// Обрабатываем значения с дефолтами
@@ -183,9 +187,48 @@ func Load() (*Config, error) {
 		result.CryptoKey = *finalConfig.CryptoKey
 	}
 
-	// Проверяем ограничения
-	if result.StoreInterval < 0 {
-		return nil, fmt.Errorf("STORE_INTERVAL must be non-negative, got %d", result.StoreInterval)
+	return result, nil
+}
+
+func validateServerConfig(cfg *Config) error {
+	if cfg.StoreInterval < 0 {
+		return fmt.Errorf("STORE_INTERVAL must be non-negative, got %d", cfg.StoreInterval)
+	}
+	return nil
+}
+
+// Load загружает конфигурацию из флагов, переменных окружения и JSON файла
+func Load() (*Config, error) {
+	// 1. Парсим флаги командной строки
+	flags, err := parseServerFlags()
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. Загружаем JSON конфигурацию (наименьший приоритет)
+	jsonConfig, err := loadServerJSONConfig(flags.configFile)
+	if err != nil {
+		return nil, err
+	}
+
+	// 3. Применяем переменные окружения (средний приоритет)
+	applyServerEnvironmentVariables(jsonConfig, flags)
+
+	// 4. Применяем флаги (наивысший приоритет)
+	finalConfig := applyServerFlags(flags)
+
+	// 5. Применяем JSON конфигурацию для незаданных значений
+	jsonConfig.ApplyToServerConfig(finalConfig)
+
+	// 6. Строим финальную конфигурацию
+	result, err := buildServerConfig(finalConfig, flags)
+	if err != nil {
+		return nil, err
+	}
+
+	// 7. Валидируем конфигурацию
+	if err := validateServerConfig(result); err != nil {
+		return nil, err
 	}
 
 	return result, nil
