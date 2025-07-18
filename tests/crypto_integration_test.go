@@ -41,7 +41,7 @@ func TestCryptoIntegration(t *testing.T) {
 
 	// Создаем сервер БЕЗ дешифрования для начала
 	storage := storage.NewMemStorage()
-	router := server.NewRouter(storage, "", "") // без ключей
+	router := server.NewRouter(storage, "", "", "") // без ключей
 	testServer := httptest.NewServer(router.GetRouter())
 	defer testServer.Close()
 
@@ -118,7 +118,7 @@ func TestCryptoIntegrationWithEncryption(t *testing.T) {
 
 	// Создаем сервер С дешифрованием
 	storage := storage.NewMemStorage()
-	router := server.NewRouter(storage, "", privateKeyFile) // с приватным ключом
+	router := server.NewRouter(storage, "", privateKeyFile, "") // с приватным ключом
 	testServer := httptest.NewServer(router.GetRouter())
 	defer testServer.Close()
 
