@@ -48,8 +48,7 @@ func setupGRPCServer(t *testing.T, trustedSubnet, key string) (*grpc.Server, *gr
 
 // setupGRPCClient создает тестовый gRPC клиент
 func setupGRPCClient(t *testing.T, listener *bufconn.Listener, key string) (*TestMetricsClient, func()) {
-	ctx := context.Background()
-	conn, err := grpc.DialContext(ctx, "bufnet",
+	conn, err := grpc.NewClient("passthrough:///bufnet",
 		grpc.WithContextDialer(bufDialer(listener)),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithUnaryInterceptor(grpcPkg.ClientIPInterceptor()),
