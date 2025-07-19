@@ -5,5 +5,7 @@
     "store_file": "/tmp/metrics-db.json",
     "database_dsn": "",
     "crypto_key": "keys/private.pem",
-    "trusted_subnet": ""
+    "trusted_subnet": "",
+    "grpc_addr": "localhost:9090",
+    "enable_grpc": false
 } 

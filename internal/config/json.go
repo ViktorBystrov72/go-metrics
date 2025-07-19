@@ -13,6 +13,8 @@ type AgentJSONConfig struct {
 	ReportInterval *string `json:"report_interval,omitempty"`
 	PollInterval   *string `json:"poll_interval,omitempty"`
 	CryptoKey      *string `json:"crypto_key,omitempty"`
+	GRPCAddress    *string `json:"grpc_address,omitempty"`
+	UseGRPC        *bool   `json:"use_grpc,omitempty"`
 }
 
 // ServerJSONConfig представляет конфигурацию сервера в JSON формате
@@ -24,6 +26,8 @@ type ServerJSONConfig struct {
 	DatabaseDSN   *string `json:"database_dsn,omitempty"`
 	CryptoKey     *string `json:"crypto_key,omitempty"`
 	TrustedSubnet *string `json:"trusted_subnet,omitempty"`
+	GRPCAddr      *string `json:"grpc_addr,omitempty"`
+	EnableGRPC    *bool   `json:"enable_grpc,omitempty"`
 }
 
 // LoadJSONFile загружает и парсит JSON файл конфигурации
@@ -91,6 +95,12 @@ func (jsonCfg *AgentJSONConfig) ApplyToAgentConfig(cfg *AgentJSONConfig) {
 	if cfg.CryptoKey == nil && jsonCfg.CryptoKey != nil {
 		cfg.CryptoKey = jsonCfg.CryptoKey
 	}
+	if cfg.GRPCAddress == nil && jsonCfg.GRPCAddress != nil {
+		cfg.GRPCAddress = jsonCfg.GRPCAddress
+	}
+	if cfg.UseGRPC == nil && jsonCfg.UseGRPC != nil {
+		cfg.UseGRPC = jsonCfg.UseGRPC
+	}
 }
 
 // ApplyToServerConfig применяет значения из JSON конфигурации, если они не заданы во flags/env
@@ -115,5 +125,11 @@ func (jsonCfg *ServerJSONConfig) ApplyToServerConfig(cfg *ServerJSONConfig) {
 	}
 	if cfg.TrustedSubnet == nil && jsonCfg.TrustedSubnet != nil {
 		cfg.TrustedSubnet = jsonCfg.TrustedSubnet
+	}
+	if cfg.GRPCAddr == nil && jsonCfg.GRPCAddr != nil {
+		cfg.GRPCAddr = jsonCfg.GRPCAddr
+	}
+	if cfg.EnableGRPC == nil && jsonCfg.EnableGRPC != nil {
+		cfg.EnableGRPC = jsonCfg.EnableGRPC
 	}
 }

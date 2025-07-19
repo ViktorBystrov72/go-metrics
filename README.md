@@ -8,6 +8,7 @@
 - Сбор метрик типа gauge и counter
 - Хранение в памяти, файле или PostgreSQL
 - Batch API для обновления множества метрик
+- **gRPC протокол** - высокопроизводительный протокол с бинарной сериализацией
 - Gzip сжатие для HTTP запросов
 - Retry логика для обработки временных ошибок**
 - Автоматический fallback между типами хранилищ
@@ -273,12 +274,44 @@ X-Real-IP: 192.168.1.100
 - При настроенной trusted_subnet сервер проверяет этот IP против доверенной подсети
 - Отсутствие заголовка или IP не из доверенной подсети приводит к ответу 403 Forbidden
 
+### gRPC API
+
+Помимо HTTP API, сервис поддерживает высокопроизводительный gRPC протокол:
+
+#### Доступные методы
+- `UpdateMetric` - обновление одной метрики
+- `GetMetric` - получение значения метрики
+- `UpdateMetrics` - batch обновление множества метрик
+- `GetAllMetrics` - получение всех метрик
+- `Ping` - проверка здоровья сервиса
+
+#### Protocol Buffers схема
+```protobuf
+service MetricsService {
+  rpc UpdateMetric(UpdateMetricRequest) returns (UpdateMetricResponse);
+  rpc GetMetric(GetMetricRequest) returns (GetMetricResponse);
+  rpc UpdateMetrics(UpdateMetricsRequest) returns (UpdateMetricsResponse);
+  rpc GetAllMetrics(GetAllMetricsRequest) returns (GetAllMetricsResponse);
+  rpc Ping(PingRequest) returns (PingResponse);
+}
+
+message Metric {
+  string id = 1;
+  string type = 2;  // "gauge" или "counter"
+  optional double value = 3;  // для gauge
+  optional int64 delta = 4;   // для counter
+  string hash = 5;            // SHA256 хеш
+}
+```
+
 ## Конфигурация
 
 ### Переменные окружения агента:
 - `ADDRESS` - адрес сервера (по умолчанию: localhost:8080)
 - `REPORT_INTERVAL` - интервал отправки метрик (по умолчанию: 10s)
 - `POLL_INTERVAL` - интервал сбора метрик (по умолчанию: 2s)
+- `GRPC_ADDRESS` - адрес gRPC сервера (например: localhost:9090)
+- `USE_GRPC` - использовать gRPC вместо HTTP (true/false)
 
 ### Переменные окружения сервера:
 - `ADDRESS` - адрес для прослушивания (по умолчанию: localhost:8080)
@@ -288,6 +321,8 @@ X-Real-IP: 192.168.1.100
 - `TRUSTED_SUBNET` - доверенная подсеть в формате CIDR (например: 192.168.0.0/16)
 - `CRYPTO_KEY` - путь к приватному ключу для дешифрования
 - `KEY` - ключ для подписи данных SHA256
+- `GRPC_ADDR` - адрес для gRPC сервера (например: localhost:9090)
+- `ENABLE_GRPC` - включить gRPC сервер (true/false)
 
 ## Логика выбора хранилища
 
@@ -620,7 +655,9 @@ go run cmd/keygen/main.go -private keys/private.pem -public keys/public.pem
     "store_file": "/tmp/metrics-db.json",
     "database_dsn": "postgres://user:pass@localhost/db",
     "crypto_key": "/path/to/private.pem",
-    "trusted_subnet": "192.168.0.0/16"
+    "trusted_subnet": "192.168.0.0/16",
+    "grpc_addr": "localhost:9090",
+    "enable_grpc": true
 }
 ```
 
@@ -633,6 +670,8 @@ go run cmd/keygen/main.go -private keys/private.pem -public keys/public.pem
 - `database_dsn` - строка подключения к БД (аналог флага `-d`)
 - `crypto_key` - путь к приватному ключу для дешифрования (аналог флага `-crypto-key`)
 - `trusted_subnet` - доверенная подсеть в формате CIDR (аналог флага `-t`)
+- `grpc_addr` - адрес и порт gRPC сервера (аналог флага `--grpc-addr`)
+- `enable_grpc` - включить gRPC сервер (аналог флага `--enable-grpc`)
 
 ### Формат конфигурации агента
 
@@ -641,7 +680,9 @@ go run cmd/keygen/main.go -private keys/private.pem -public keys/public.pem
     "address": "localhost:8080",
     "report_interval": "10s",
     "poll_interval": "2s",
-    "crypto_key": "/path/to/public.pem"
+    "crypto_key": "/path/to/public.pem",
+    "grpc_address": "localhost:9090",
+    "use_grpc": false
 }
 ```
 
@@ -651,6 +692,8 @@ go run cmd/keygen/main.go -private keys/private.pem -public keys/public.pem
 - `report_interval` - интервал отправки метрик (аналог флага `-r`)
 - `poll_interval` - интервал сбора метрик (аналог флага `-p`)
 - `crypto_key` - путь к публичному ключу для шифрования (аналог флага `-crypto-key`)
+- `grpc_address` - адрес gRPC сервера (аналог флага `--grpc-addr`)
+- `use_grpc` - использовать gRPC вместо HTTP (аналог флага `--use-grpc`)
 
 ### Форматы времени
 
@@ -688,6 +731,23 @@ CONFIG=configs/agent.json ./agent
 # JSON файл устанавливает address: "localhost:8080"
 # Флаг переопределяет значение
 ./server -c configs/server.json -a "0.0.0.0:9090"
+```
+
+#### Запуск с gRPC
+
+```bash
+# Запуск сервера с gRPC
+./server --enable-grpc --grpc-addr="localhost:9090"
+
+# Запуск агента с gRPC
+./agent --use-grpc --grpc-addr="localhost:9090"
+
+# Через переменные окружения
+ENABLE_GRPC=true GRPC_ADDR="localhost:9090" ./server
+USE_GRPC=true GRPC_ADDRESS="localhost:9090" ./agent
+
+# Комбинированный режим (HTTP + gRPC одновременно)
+./server -a "localhost:8080" --enable-grpc --grpc-addr="localhost:9090"
 ```
 
 ### Обратная совместимость
@@ -803,4 +863,4 @@ kill -INT <agent_pid>
 # или Ctrl+C
 ```
 
-**Важно**: Не используйте `kill -9` (SIGKILL), так как этот сигнал не может быть перехвачен и приведет к некорректному завершению работы без сохранения данных. 
+**Важно**: Не используйте `kill -9` (SIGKILL), так как этот сигнал не может быть перехвачен и приведет к некорректному завершению работы без сохранения данных.
