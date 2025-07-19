@@ -2,5 +2,7 @@
     "address": "metrics-server.company.com:8080",
     "report_interval": "30s",
     "poll_interval": "5s",
-    "crypto_key": "/etc/ssl/certs/metrics-agent.pem"
+    "crypto_key": "/etc/ssl/certs/metrics-agent.pem",
+    "grpc_address": "metrics-server.company.com:9090",
+    "use_grpc": true
 } 

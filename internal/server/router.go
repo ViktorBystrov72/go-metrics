@@ -20,7 +20,7 @@ type Router struct {
 }
 
 // NewRouter создает новый роутер
-func NewRouter(storage storage.Storage, key string, cryptoKeyPath string) *Router {
+func NewRouter(storage storage.Storage, key string, cryptoKeyPath string, trustedSubnet string) *Router {
 	handlers := NewHandlers(storage, key)
 	router := chi.NewRouter()
 
@@ -40,6 +40,7 @@ func NewRouter(storage storage.Storage, key string, cryptoKeyPath string) *Route
 
 	// Middleware
 	router.Use(middleware.DecryptMiddleware(privateKey))
+	router.Use(middleware.IPCheckMiddleware(trustedSubnet))
 	router.Use(middleware.GzipMiddleware)
 
 	// Маршруты для обновления метрик

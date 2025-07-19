@@ -16,6 +16,8 @@ type AgentConfig struct {
 	Key            string
 	RateLimit      int
 	CryptoKey      string
+	GRPCAddress    string // адрес gRPC сервера
+	UseGRPC        bool   // использовать gRPC вместо HTTP
 }
 
 type flagValues struct {
@@ -25,6 +27,8 @@ type flagValues struct {
 	key            string
 	rateLimit      int
 	cryptoKey      string
+	grpcAddress    string
+	useGRPC        bool
 	configFile     string
 }
 
@@ -38,6 +42,8 @@ func parseFlags() (*flagValues, error) {
 	fs.StringVar(&flags.key, "k", "", "signature key")
 	fs.IntVar(&flags.rateLimit, "l", 1, "rate limit for concurrent requests")
 	fs.StringVar(&flags.cryptoKey, "crypto-key", "", "path to public key file for encryption")
+	fs.StringVar(&flags.grpcAddress, "grpc-addr", "", "gRPC server address")
+	fs.BoolVar(&flags.useGRPC, "use-grpc", false, "use gRPC instead of HTTP")
 	fs.StringVar(&flags.configFile, "c", "", "config file path")
 	fs.StringVar(&flags.configFile, "config", "", "config file path")
 
@@ -95,6 +101,17 @@ func applyEnvironmentVariables(jsonConfig *config.AgentJSONConfig, flags *flagVa
 		jsonConfig.CryptoKey = stringPtr(env)
 	}
 
+	if env := os.Getenv("GRPC_ADDRESS"); env != "" {
+		jsonConfig.GRPCAddress = stringPtr(env)
+	}
+
+	if env := os.Getenv("USE_GRPC"); env != "" {
+		if env == "true" || env == "1" {
+			b := true
+			jsonConfig.UseGRPC = &b
+		}
+	}
+
 	// KEY и RATE_LIMIT не поддерживаются в JSON, применяем к флагам
 	if env := os.Getenv("KEY"); env != "" {
 		flags.key = env
@@ -126,6 +143,13 @@ func applyFlags(flags *flagValues) *config.AgentJSONConfig {
 	}
 	if flags.cryptoKey != "" {
 		finalConfig.CryptoKey = stringPtr(flags.cryptoKey)
+	}
+	if flags.grpcAddress != "" {
+		finalConfig.GRPCAddress = stringPtr(flags.grpcAddress)
+	}
+	if flags.useGRPC {
+		b := true
+		finalConfig.UseGRPC = &b
 	}
 
 	return finalConfig
@@ -166,6 +190,19 @@ func buildFinalConfig(finalConfig *config.AgentJSONConfig, flags *flagValues) (*
 
 	if finalConfig.CryptoKey != nil {
 		result.CryptoKey = *finalConfig.CryptoKey
+	}
+
+	if finalConfig.GRPCAddress != nil {
+		result.GRPCAddress = *finalConfig.GRPCAddress
+	} else {
+		// Значение по умолчанию для gRPC адреса если включен gRPC
+		if finalConfig.UseGRPC != nil && *finalConfig.UseGRPC {
+			result.GRPCAddress = "localhost:9090"
+		}
+	}
+
+	if finalConfig.UseGRPC != nil {
+		result.UseGRPC = *finalConfig.UseGRPC
 	}
 
 	return result, nil

@@ -16,6 +16,9 @@ type Config struct {
 	DatabaseDSN     string
 	Key             string
 	CryptoKey       string
+	TrustedSubnet   string
+	GRPCAddr        string // адрес для gRPC сервера
+	EnableGRPC      bool   // включить gRPC сервер
 }
 
 type serverFlagValues struct {
@@ -26,6 +29,9 @@ type serverFlagValues struct {
 	databaseDSN     string
 	key             string
 	cryptoKey       string
+	trustedSubnet   string
+	grpcAddr        string
+	enableGRPC      bool
 	configFile      string
 }
 
@@ -40,6 +46,9 @@ func parseServerFlags() (*serverFlagValues, error) {
 	fs.StringVar(&flags.databaseDSN, "d", "", "database DSN")
 	fs.StringVar(&flags.key, "k", "", "signature key")
 	fs.StringVar(&flags.cryptoKey, "crypto-key", "", "path to private key file for decryption")
+	fs.StringVar(&flags.trustedSubnet, "t", "", "trusted subnet in CIDR format")
+	fs.StringVar(&flags.grpcAddr, "grpc-addr", "", "address for gRPC server")
+	fs.BoolVar(&flags.enableGRPC, "enable-grpc", false, "enable gRPC server")
 	fs.StringVar(&flags.configFile, "c", "", "config file path")
 	fs.StringVar(&flags.configFile, "config", "", "config file path")
 
@@ -110,6 +119,20 @@ func applyServerEnvironmentVariables(jsonConfig *ServerJSONConfig, flags *server
 	if envCryptoKey := os.Getenv("CRYPTO_KEY"); envCryptoKey != "" {
 		jsonConfig.CryptoKey = stringPtr(envCryptoKey)
 	}
+
+	if envTrustedSubnet := os.Getenv("TRUSTED_SUBNET"); envTrustedSubnet != "" {
+		jsonConfig.TrustedSubnet = stringPtr(envTrustedSubnet)
+	}
+
+	if envGRPCAddr := os.Getenv("GRPC_ADDR"); envGRPCAddr != "" {
+		jsonConfig.GRPCAddr = stringPtr(envGRPCAddr)
+	}
+
+	if envEnableGRPC := os.Getenv("ENABLE_GRPC"); envEnableGRPC != "" {
+		if envEnableGRPC == "true" || envEnableGRPC == "1" {
+			jsonConfig.EnableGRPC = boolPtr(true)
+		}
+	}
 }
 
 func applyServerFlags(flags *serverFlagValues) *ServerJSONConfig {
@@ -140,6 +163,15 @@ func applyServerFlags(flags *serverFlagValues) *ServerJSONConfig {
 	}
 	if flags.cryptoKey != "" {
 		finalConfig.CryptoKey = stringPtr(flags.cryptoKey)
+	}
+	if flags.trustedSubnet != "" {
+		finalConfig.TrustedSubnet = stringPtr(flags.trustedSubnet)
+	}
+	if flags.grpcAddr != "" {
+		finalConfig.GRPCAddr = stringPtr(flags.grpcAddr)
+	}
+	if flags.enableGRPC {
+		finalConfig.EnableGRPC = boolPtr(true)
 	}
 
 	return finalConfig
@@ -185,6 +217,23 @@ func buildServerConfig(finalConfig *ServerJSONConfig, flags *serverFlagValues) (
 
 	if finalConfig.CryptoKey != nil {
 		result.CryptoKey = *finalConfig.CryptoKey
+	}
+
+	if finalConfig.TrustedSubnet != nil {
+		result.TrustedSubnet = *finalConfig.TrustedSubnet
+	}
+
+	if finalConfig.GRPCAddr != nil {
+		result.GRPCAddr = *finalConfig.GRPCAddr
+	} else {
+		// Значение по умолчанию для gRPC адреса если включен gRPC
+		if finalConfig.EnableGRPC != nil && *finalConfig.EnableGRPC {
+			result.GRPCAddr = "localhost:9090"
+		}
+	}
+
+	if finalConfig.EnableGRPC != nil {
+		result.EnableGRPC = *finalConfig.EnableGRPC
 	}
 
 	return result, nil

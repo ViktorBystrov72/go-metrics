@@ -86,7 +86,7 @@ func setupStorageManager(storageInstance storage.Storage, cfg *config.Config) *s
 }
 
 func setupHTTPServer(cfg *config.Config, storageInstance storage.Storage) (*http.Server, error) {
-	router := server.NewRouter(storageInstance, cfg.Key, cfg.CryptoKey)
+	router := server.NewRouter(storageInstance, cfg.Key, cfg.CryptoKey, cfg.TrustedSubnet)
 
 	zapLogger, err := logger.NewZapLogger()
 	if err != nil {

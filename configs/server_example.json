@@ -4,5 +4,8 @@
     "store_interval": "5m",
     "store_file": "/var/lib/metrics/data.json",
     "database_dsn": "postgres://user:password@localhost/metrics?sslmode=disable",
-    "crypto_key": "/etc/ssl/private/metrics-server.pem"
+    "crypto_key": "/etc/ssl/private/metrics-server.pem",
+    "trusted_subnet": "192.168.0.0/16",
+    "grpc_addr": "0.0.0.0:9090",
+    "enable_grpc": true
 } 
