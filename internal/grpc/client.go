@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/ViktorBystrov72/go-metrics/internal/converters"
+	"github.com/ViktorBystrov72/go-metrics/internal/hashservice"
 	"github.com/ViktorBystrov72/go-metrics/internal/models"
-	"github.com/ViktorBystrov72/go-metrics/internal/utils"
 	pb "github.com/ViktorBystrov72/go-metrics/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -19,7 +19,7 @@ import (
 type MetricsClient struct {
 	client pb.MetricsServiceClient
 	conn   *grpc.ClientConn
-	key    string // ключ для подписи метрик
+	hasher *hashservice.ProtoHasher
 }
 
 // NewMetricsClient создает новый gRPC клиент для метрик
@@ -38,7 +38,7 @@ func NewMetricsClient(serverAddress, key string) (*MetricsClient, error) {
 	return &MetricsClient{
 		client: client,
 		conn:   conn,
-		key:    key,
+		hasher: hashservice.NewProtoHasher(key),
 	}, nil
 }
 
@@ -53,7 +53,7 @@ func (c *MetricsClient) SendMetric(ctx context.Context, metric models.Metrics) e
 	pbMetric := converters.ModelToProto(metric)
 
 	// Добавляем хеш если ключ задан
-	c.addHashToMetric(pbMetric)
+	c.hasher.AddHash(pbMetric)
 
 	req := &pb.UpdateMetricRequest{
 		Metric: pbMetric,
@@ -81,9 +81,7 @@ func (c *MetricsClient) SendBatch(ctx context.Context, metrics []models.Metrics)
 	pbMetrics := converters.ModelsToProtos(metrics)
 
 	// Добавляем хеши ко всем метрикам
-	for _, pbMetric := range pbMetrics {
-		c.addHashToMetric(pbMetric)
-	}
+	c.hasher.AddHashes(pbMetrics)
 
 	req := &pb.UpdateMetricsRequest{
 		Metrics: pbMetrics,
@@ -153,30 +151,6 @@ func (c *MetricsClient) Ping(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-// addHashToMetric добавляет хеш к метрике если ключ задан
-func (c *MetricsClient) addHashToMetric(metric *pb.Metric) {
-	if c.key == "" {
-		return
-	}
-
-	// Создаем строку для хеширования
-	var data string
-	switch metric.Type {
-	case "counter":
-		if metric.Delta != nil {
-			data = fmt.Sprintf("%s:%s:%d", metric.Id, metric.Type, *metric.Delta)
-		}
-	case "gauge":
-		if metric.Value != nil {
-			data = fmt.Sprintf("%s:%s:%f", metric.Id, metric.Type, *metric.Value)
-		}
-	}
-
-	if data != "" {
-		metric.Hash = utils.CalculateHash([]byte(data), c.key)
-	}
 }
 
 // ClientIPInterceptor добавляет X-Real-IP в метаданные gRPC запроса

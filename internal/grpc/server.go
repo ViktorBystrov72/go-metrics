@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/ViktorBystrov72/go-metrics/internal/converters"
+	"github.com/ViktorBystrov72/go-metrics/internal/hashservice"
 	"github.com/ViktorBystrov72/go-metrics/internal/storage"
-	"github.com/ViktorBystrov72/go-metrics/internal/utils"
 	pb "github.com/ViktorBystrov72/go-metrics/proto"
 )
 
@@ -16,14 +16,14 @@ type MetricsServer struct {
 	pb.UnimplementedMetricsServiceServer
 
 	storage storage.Storage
-	key     string // ключ для проверки хешей
+	hasher  *hashservice.ProtoHasher
 }
 
 // NewMetricsServer создает новый gRPC сервер для метрик
 func NewMetricsServer(storage storage.Storage, key string) *MetricsServer {
 	return &MetricsServer{
 		storage: storage,
-		key:     key,
+		hasher:  hashservice.NewProtoHasher(key),
 	}
 }
 
@@ -36,7 +36,7 @@ func (s *MetricsServer) UpdateMetric(ctx context.Context, req *pb.UpdateMetricRe
 	}
 
 	// Проверяем хеш если ключ задан
-	if s.key != "" && !s.verifyMetricHash(req.Metric) {
+	if s.hasher.IsEnabled() && !s.hasher.VerifyHash(req.Metric) {
 		return &pb.UpdateMetricResponse{
 			Error: "hash verification failed",
 		}, nil
@@ -56,7 +56,7 @@ func (s *MetricsServer) UpdateMetric(ctx context.Context, req *pb.UpdateMetricRe
 		response := &pb.UpdateMetricResponse{
 			Metric: converters.CreateGaugeProto(req.Metric.Id, *req.Metric.Value),
 		}
-		s.addHashToMetric(response.Metric)
+		s.hasher.AddHash(response.Metric)
 		return response, nil
 
 	case "counter":
@@ -78,7 +78,7 @@ func (s *MetricsServer) UpdateMetric(ctx context.Context, req *pb.UpdateMetricRe
 		response := &pb.UpdateMetricResponse{
 			Metric: converters.CreateCounterProto(req.Metric.Id, value),
 		}
-		s.addHashToMetric(response.Metric)
+		s.hasher.AddHash(response.Metric)
 		return response, nil
 
 	default:
@@ -100,7 +100,7 @@ func (s *MetricsServer) GetMetric(ctx context.Context, req *pb.GetMetricRequest)
 		}
 
 		metric := converters.CreateGaugeProto(req.Id, value)
-		s.addHashToMetric(metric)
+		s.hasher.AddHash(metric)
 
 		return &pb.GetMetricResponse{
 			Metric: metric,
@@ -115,7 +115,7 @@ func (s *MetricsServer) GetMetric(ctx context.Context, req *pb.GetMetricRequest)
 		}
 
 		metric := converters.CreateCounterProto(req.Id, value)
-		s.addHashToMetric(metric)
+		s.hasher.AddHash(metric)
 
 		return &pb.GetMetricResponse{
 			Metric: metric,
@@ -137,13 +137,11 @@ func (s *MetricsServer) UpdateMetrics(ctx context.Context, req *pb.UpdateMetrics
 	}
 
 	// Проверяем хеши всех метрик если ключ задан
-	if s.key != "" {
-		for i, metric := range req.Metrics {
-			if !s.verifyMetricHash(metric) {
-				return &pb.UpdateMetricsResponse{
-					Error: fmt.Sprintf("hash verification failed for metric %d: %s", i, metric.Id),
-				}, nil
-			}
+	if s.hasher.IsEnabled() {
+		if err := s.hasher.VerifyHashes(req.Metrics); err != nil {
+			return &pb.UpdateMetricsResponse{
+				Error: err.Error(),
+			}, nil
 		}
 	}
 
@@ -176,7 +174,7 @@ func (s *MetricsServer) GetAllMetrics(ctx context.Context, req *pb.GetAllMetrics
 	gaugeProtos := make([]*pb.Metric, 0, len(gauges))
 	for name, value := range gauges {
 		metric := converters.CreateGaugeProto(name, value)
-		s.addHashToMetric(metric)
+		s.hasher.AddHash(metric)
 		gaugeProtos = append(gaugeProtos, metric)
 	}
 
@@ -185,7 +183,7 @@ func (s *MetricsServer) GetAllMetrics(ctx context.Context, req *pb.GetAllMetrics
 	counterProtos := make([]*pb.Metric, 0, len(counters))
 	for name, value := range counters {
 		metric := converters.CreateCounterProto(name, value)
-		s.addHashToMetric(metric)
+		s.hasher.AddHash(metric)
 		counterProtos = append(counterProtos, metric)
 	}
 
@@ -210,55 +208,4 @@ func (s *MetricsServer) Ping(ctx context.Context, req *pb.PingRequest) (*pb.Ping
 	return &pb.PingResponse{
 		Ok: true,
 	}, nil
-}
-
-// verifyMetricHash проверяет хеш метрики
-func (s *MetricsServer) verifyMetricHash(metric *pb.Metric) bool {
-	if s.key == "" {
-		return true
-	}
-
-	// Создаем строку для хеширования
-	var data string
-	switch metric.Type {
-	case "counter":
-		if metric.Delta != nil {
-			data = fmt.Sprintf("%s:%s:%d", metric.Id, metric.Type, *metric.Delta)
-		}
-	case "gauge":
-		if metric.Value != nil {
-			data = fmt.Sprintf("%s:%s:%f", metric.Id, metric.Type, *metric.Value)
-		}
-	}
-
-	if data == "" {
-		return false
-	}
-
-	expectedHash := utils.CalculateHash([]byte(data), s.key)
-	return expectedHash == metric.Hash
-}
-
-// addHashToMetric добавляет хеш к метрике
-func (s *MetricsServer) addHashToMetric(metric *pb.Metric) {
-	if s.key == "" {
-		return
-	}
-
-	// Создаем строку для хеширования
-	var data string
-	switch metric.Type {
-	case "counter":
-		if metric.Delta != nil {
-			data = fmt.Sprintf("%s:%s:%d", metric.Id, metric.Type, *metric.Delta)
-		}
-	case "gauge":
-		if metric.Value != nil {
-			data = fmt.Sprintf("%s:%s:%f", metric.Id, metric.Type, *metric.Value)
-		}
-	}
-
-	if data != "" {
-		metric.Hash = utils.CalculateHash([]byte(data), s.key)
-	}
 }
