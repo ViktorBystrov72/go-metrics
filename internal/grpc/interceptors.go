@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 
+	"github.com/ViktorBystrov72/go-metrics/internal/ipcheck"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -14,12 +15,17 @@ import (
 
 // IPCheckInterceptor создает gRPC interceptor для проверки IP-адресов против доверенной подсети
 func IPCheckInterceptor(trustedSubnet string) grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		// Если доверенная подсеть не указана, пропускаем проверку
-		if trustedSubnet == "" {
-			return handler(ctx, req)
+	// Создаем IP check service
+	ipService, err := ipcheck.NewService(trustedSubnet)
+	if err != nil {
+		log.Printf("Ошибка создания IP check service: %v", err)
+		// Возвращаем interceptor который всегда запрещает доступ
+		return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+			return nil, status.Error(codes.Internal, "Internal server error")
 		}
+	}
 
+	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		// Получаем IP-адрес из метаданных X-Real-IP или из peer info
 		var clientIP string
 
@@ -39,32 +45,17 @@ func IPCheckInterceptor(trustedSubnet string) grpc.UnaryServerInterceptor {
 			}
 		}
 
-		if clientIP == "" {
-			log.Printf("Отсутствует X-Real-IP в метаданных и peer info")
+		// Проверяем IP через общий сервис
+		result := ipService.CheckIP(clientIP)
+
+		// Логируем результат
+		ipcheck.LogResult(result)
+
+		// Проверяем результат
+		if !result.Allowed {
 			return nil, status.Error(codes.PermissionDenied, "Forbidden")
 		}
 
-		// Парсим IP-адрес
-		ip := net.ParseIP(clientIP)
-		if ip == nil {
-			log.Printf("Некорректный IP-адрес: %s", clientIP)
-			return nil, status.Error(codes.PermissionDenied, "Forbidden")
-		}
-
-		// Парсим доверенную подсеть
-		_, subnet, err := net.ParseCIDR(trustedSubnet)
-		if err != nil {
-			log.Printf("Ошибка парсинга доверенной подсети %s: %v", trustedSubnet, err)
-			return nil, status.Error(codes.Internal, "Internal server error")
-		}
-
-		// Проверяем вхождение IP в подсеть
-		if !subnet.Contains(ip) {
-			log.Printf("IP-адрес %s не входит в доверенную подсеть %s", clientIP, trustedSubnet)
-			return nil, status.Error(codes.PermissionDenied, "Forbidden")
-		}
-
-		log.Printf("IP-адрес %s разрешен (входит в подсеть %s)", clientIP, trustedSubnet)
 		return handler(ctx, req)
 	}
 }
