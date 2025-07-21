@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package metrics;
+
+option go_package = "github.com/ViktorBystrov72/go-metrics/proto";
+
+// Metric представляет единицу метрики
+message Metric {
+  string id = 1;                    // имя метрики
+  string type = 2;                  // тип метрики: "gauge" или "counter"
+  optional double value = 3;        // значение для gauge метрик
+  optional int64 delta = 4;         // значение для counter метрик
+  string hash = 5;                  // хеш для проверки целостности
+}
+
+// UpdateMetricRequest запрос для обновления одной метрики
+message UpdateMetricRequest {
+  Metric metric = 1;
+}
+
+// UpdateMetricResponse ответ на обновление метрики
+message UpdateMetricResponse {
+  Metric metric = 1;                // обновленная метрика с актуальными значениями
+  string error = 2;                 // ошибка, если есть
+}
+
+// GetMetricRequest запрос для получения значения метрики
+message GetMetricRequest {
+  string id = 1;                    // имя метрики
+  string type = 2;                  // тип метрики
+}
+
+// GetMetricResponse ответ с значением метрики
+message GetMetricResponse {
+  Metric metric = 1;                // метрика со значением
+  string error = 2;                 // ошибка, если метрика не найдена
+}
+
+// UpdateMetricsRequest запрос для batch обновления метрик
+message UpdateMetricsRequest {
+  repeated Metric metrics = 1;      // список метрик для обновления
+}
+
+// UpdateMetricsResponse ответ на batch обновление
+message UpdateMetricsResponse {
+  string error = 1;                 // ошибка, если есть
+}
+
+// GetAllMetricsRequest запрос для получения всех метрик
+message GetAllMetricsRequest {
+  // пустой запрос
+}
+
+// GetAllMetricsResponse ответ со всеми метриками
+message GetAllMetricsResponse {
+  repeated Metric metrics = 1;      // все метрики в системе
+}
+
+// PingRequest запрос для проверки здоровья сервиса
+message PingRequest {
+  // пустой запрос
+}
+
+// PingResponse ответ на ping
+message PingResponse {
+  bool ok = 1;                      // true если сервис здоров
+  string error = 2;                 // ошибка, если есть проблемы
+}
+
+// MetricsService определяет gRPC сервис для работы с метриками
+service MetricsService {
+  // UpdateMetric обновляет одну метрику
+  rpc UpdateMetric(UpdateMetricRequest) returns (UpdateMetricResponse);
+  
+  // GetMetric получает значение одной метрики
+  rpc GetMetric(GetMetricRequest) returns (GetMetricResponse);
+  
+  // UpdateMetrics обновляет множество метрик в одном запросе (batch)
+  rpc UpdateMetrics(UpdateMetricsRequest) returns (UpdateMetricsResponse);
+  
+  // GetAllMetrics получает все метрики в системе
+  rpc GetAllMetrics(GetAllMetricsRequest) returns (GetAllMetricsResponse);
+  
+  // Ping проверяет здоровье сервиса и доступность хранилища
+  rpc Ping(PingRequest) returns (PingResponse);
+} 

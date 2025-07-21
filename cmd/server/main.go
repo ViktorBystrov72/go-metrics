@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -11,10 +12,14 @@ import (
 	"syscall"
 	"time"
 
+	"google.golang.org/grpc"
+
 	"github.com/ViktorBystrov72/go-metrics/internal/config"
+	grpcServer "github.com/ViktorBystrov72/go-metrics/internal/grpc"
 	"github.com/ViktorBystrov72/go-metrics/internal/logger"
 	"github.com/ViktorBystrov72/go-metrics/internal/server"
 	"github.com/ViktorBystrov72/go-metrics/internal/storage"
+	pb "github.com/ViktorBystrov72/go-metrics/proto"
 )
 
 var (
@@ -28,6 +33,8 @@ type ServerComponents struct {
 	StorageManager *server.StorageManager
 	HTTPServer     *http.Server
 	PProfServer    *http.Server
+	GRPCServer     *grpc.Server
+	GRPCListener   net.Listener
 }
 
 func printBuildInfo() {
@@ -86,7 +93,7 @@ func setupStorageManager(storageInstance storage.Storage, cfg *config.Config) *s
 }
 
 func setupHTTPServer(cfg *config.Config, storageInstance storage.Storage) (*http.Server, error) {
-	router := server.NewRouter(storageInstance, cfg.Key, cfg.CryptoKey)
+	router := server.NewRouter(storageInstance, cfg.Key, cfg.CryptoKey, cfg.TrustedSubnet)
 
 	zapLogger, err := logger.NewZapLogger()
 	if err != nil {
@@ -108,21 +115,59 @@ func setupPProfServer() *http.Server {
 	}
 }
 
-func startServers(httpServer, pprofServer *http.Server) {
+func setupGRPCServer(cfg *config.Config, storageInstance storage.Storage) (*grpc.Server, net.Listener, error) {
+	// Проверяем, включен ли gRPC сервер
+	if !cfg.EnableGRPC {
+		return nil, nil, nil
+	}
+
+	// Создаем TCP listener для gRPC
+	listener, err := net.Listen("tcp", cfg.GRPCAddr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to listen on %s: %v", cfg.GRPCAddr, err)
+	}
+
+	// Создаем gRPC сервер с middleware
+	grpcSrv := grpc.NewServer(
+		grpc.ChainUnaryInterceptor(
+			grpcServer.LoggingInterceptor(),
+			grpcServer.IPCheckInterceptor(cfg.TrustedSubnet),
+			grpcServer.RecoveryInterceptor(),
+		),
+	)
+
+	// Создаем и регистрируем наш MetricsServer
+	metricsServer := grpcServer.NewMetricsServer(storageInstance, cfg.Key)
+	pb.RegisterMetricsServiceServer(grpcSrv, metricsServer)
+
+	return grpcSrv, listener, nil
+}
+
+func startServers(components *ServerComponents) {
 	// Запуск pprof на отдельном порту
 	go func() {
-		if err := pprofServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := components.PProfServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("pprof server error: %v", err)
 		}
 	}()
 
 	// Запускаем HTTP сервер в горутине
 	go func() {
-		log.Printf("Запуск сервера на %s", httpServer.Addr)
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("Запуск HTTP сервера на %s", components.HTTPServer.Addr)
+		if err := components.HTTPServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("HTTP server error: %v", err)
 		}
 	}()
+
+	// Запускаем gRPC сервер, если он настроен
+	if components.GRPCServer != nil && components.GRPCListener != nil {
+		go func() {
+			log.Printf("Запуск gRPC сервера на %s", components.GRPCListener.Addr().String())
+			if err := components.GRPCServer.Serve(components.GRPCListener); err != nil {
+				log.Fatalf("gRPC server error: %v", err)
+			}
+		}()
+	}
 }
 
 func waitForShutdownSignal() os.Signal {
@@ -134,6 +179,23 @@ func waitForShutdownSignal() os.Signal {
 func performGracefulShutdown(components *ServerComponents) {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
+
+	// Останавливаем gRPC сервер первым (graceful stop)
+	if components.GRPCServer != nil {
+		log.Printf("Остановка gRPC сервера...")
+		go func() {
+			// GracefulStop останавливает прием новых соединений и ждет завершения текущих запросов
+			components.GRPCServer.GracefulStop()
+		}()
+
+		// Устанавливаем таймаут для graceful stop
+		go func() {
+			<-shutdownCtx.Done()
+			log.Printf("Принудительная остановка gRPC сервера...")
+			components.GRPCServer.Stop() // Принудительная остановка если graceful не сработал
+		}()
+		log.Printf("gRPC сервер остановлен")
+	}
 
 	// Останавливаем HTTP сервер
 	log.Printf("Остановка HTTP сервера...")
@@ -189,14 +251,21 @@ func main() {
 
 	pprofServer := setupPProfServer()
 
+	grpcSrv, grpcListener, err := setupGRPCServer(cfg, storageInstance)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	components := &ServerComponents{
 		Storage:        storageInstance,
 		StorageManager: storageManager,
 		HTTPServer:     httpServer,
 		PProfServer:    pprofServer,
+		GRPCServer:     grpcSrv,
+		GRPCListener:   grpcListener,
 	}
 
-	startServers(httpServer, pprofServer)
+	startServers(components)
 
 	sig := waitForShutdownSignal()
 	log.Printf("Получен сигнал %v, запускаем graceful shutdown...", sig)

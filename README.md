@@ -8,10 +8,13 @@
 - Сбор метрик типа gauge и counter
 - Хранение в памяти, файле или PostgreSQL
 - Batch API для обновления множества метрик
+- **gRPC протокол** - высокопроизводительный протокол с бинарной сериализацией
 - Gzip сжатие для HTTP запросов
 - Retry логика для обработки временных ошибок**
 - Автоматический fallback между типами хранилищ
 - Подпись данных по алгоритму SHA256 для обеспечения целостности
+- Контроль доступа по IP адресам с поддержкой доверенных подсетей (CIDR)
+- Автоматическое определение IP агента через заголовок X-Real-IP
 
 ## Retry логика
 
@@ -64,6 +67,96 @@ KEY="my-secret-key" ./bin/server
 ```
 
 **Примечание**: Это учебный пример для демонстрации механизмов подписи. В реальных проектах рекомендуется использовать более надежные методы аутентификации и авторизации.
+
+## Trusted Subnet и контроль IP адресов
+
+Сервис поддерживает механизм контроля доступа по IP адресам агентов через доверенные подсети:
+
+### Агент
+- **Заголовок X-Real-IP**: автоматически добавляет IP-адрес хоста в каждый HTTP запрос
+- **Определение IP**: использует сетевое соединение для получения реального IP (не localhost)
+- **Функция getHostIP()**: определяет IP хоста через подключение к внешнему адресу
+
+### Сервер
+- **Проверка подсети**: проверяет IP из заголовка X-Real-IP против настроенной доверенной подсети
+- **CIDR поддержка**: поддерживает нотацию CIDR для определения подсетей (например: `192.168.0.0/16`)
+- **IPv4/IPv6**: поддерживает как IPv4, так и IPv6 адреса
+- **403 Forbidden**: возвращает статус 403 для IP адресов не из доверенной подсети
+- **Bypass режим**: при пустой `trusted_subnet` разрешает доступ всем IP адресам
+
+### Конфигурация
+
+#### Сервер
+```bash
+# Через флаг командной строки
+./server -t "192.168.0.0/16"
+
+# Через переменную окружения
+TRUSTED_SUBNET="192.168.0.0/16" ./server
+
+# Через JSON конфигурацию
+{
+  "trusted_subnet": "192.168.0.0/16"
+}
+```
+
+#### Поддерживаемые форматы подсетей:
+- **IPv4**: `192.168.1.0/24`, `10.0.0.0/8`, `172.16.0.0/12`
+- **IPv6**: `2001:db8::/32`, `::1/128`
+- **Localhost**: `127.0.0.0/8` (для IPv4), `::1/128` (для IPv6)
+- **Пустая строка**: разрешает все IP адреса (отключает проверку)
+
+### Примеры использования
+
+```bash
+# Разрешить только локальную сеть
+./server -t "192.168.0.0/16"
+
+# Разрешить только localhost
+./server -t "127.0.0.0/8"
+
+# Разрешить корпоративную сеть
+./server -t "10.0.0.0/8"
+
+# Отключить проверку IP (по умолчанию)
+./server
+
+# Запуск агента (X-Real-IP добавляется автоматически)
+./agent -a "localhost:8080"
+```
+
+### Логирование
+
+Сервер подробно логирует все события безопасности:
+
+```bash
+# Разрешенный IP
+2025/07/18 18:36:52 IP-адрес 192.168.1.10 разрешен (входит в подсеть 192.168.1.0/24)
+
+# Заблокированный IP
+2025/07/18 18:36:52 IP-адрес 10.0.0.1 не входит в доверенную подсеть 192.168.1.0/24
+
+# Отсутствие заголовка
+2025/07/18 18:36:52 Отсутствует заголовок X-Real-IP
+
+# Некорректный IP
+2025/07/18 18:36:52 Некорректный IP-адрес в заголовке X-Real-IP: invalid-ip
+```
+
+### Тестирование
+
+```bash
+# Тест с валидным IP
+curl -H "X-Real-IP: 192.168.1.100" http://localhost:8080/
+
+# Тест с невалидным IP (получим 403)
+curl -H "X-Real-IP: 8.8.8.8" http://localhost:8080/
+
+# Запуск интеграционных тестов
+go test ./tests/ -run TestTrustedSubnet -v
+```
+
+**Безопасность**: Функция предназначена для базового контроля доступа в доверенных средах. Для критически важных систем рекомендуется использовать дополнительные методы аутентификации и авторизации.
 
 ## Архитектура
 
@@ -140,6 +233,7 @@ DATABASE_DSN='postgres://postgres:postgres@localhost:5432/praktikum?sslmode=disa
 ### Обновление метрики
 ```http
 POST /update/{type}/{name}/{value}
+X-Real-IP: 192.168.1.100
 ```
 
 ### Batch обновление метрик
@@ -147,6 +241,7 @@ POST /update/{type}/{name}/{value}
 POST /updates/
 Content-Type: application/json
 Content-Encoding: gzip
+X-Real-IP: 192.168.1.100
 
 [
   {
@@ -166,10 +261,46 @@ Content-Encoding: gzip
 ```http
 POST /value/
 Content-Type: application/json
+X-Real-IP: 192.168.1.100
 
 {
   "id": "metric1",
   "type": "gauge"
+}
+```
+
+**Заголовки безопасности:**
+- `X-Real-IP` - IP-адрес агента (добавляется автоматически агентом)
+- При настроенной trusted_subnet сервер проверяет этот IP против доверенной подсети
+- Отсутствие заголовка или IP не из доверенной подсети приводит к ответу 403 Forbidden
+
+### gRPC API
+
+Помимо HTTP API, сервис поддерживает высокопроизводительный gRPC протокол:
+
+#### Доступные методы
+- `UpdateMetric` - обновление одной метрики
+- `GetMetric` - получение значения метрики
+- `UpdateMetrics` - batch обновление множества метрик
+- `GetAllMetrics` - получение всех метрик
+- `Ping` - проверка здоровья сервиса
+
+#### Protocol Buffers схема
+```protobuf
+service MetricsService {
+  rpc UpdateMetric(UpdateMetricRequest) returns (UpdateMetricResponse);
+  rpc GetMetric(GetMetricRequest) returns (GetMetricResponse);
+  rpc UpdateMetrics(UpdateMetricsRequest) returns (UpdateMetricsResponse);
+  rpc GetAllMetrics(GetAllMetricsRequest) returns (GetAllMetricsResponse);
+  rpc Ping(PingRequest) returns (PingResponse);
+}
+
+message Metric {
+  string id = 1;
+  string type = 2;  // "gauge" или "counter"
+  optional double value = 3;  // для gauge
+  optional int64 delta = 4;   // для counter
+  string hash = 5;            // SHA256 хеш
 }
 ```
 
@@ -179,12 +310,19 @@ Content-Type: application/json
 - `ADDRESS` - адрес сервера (по умолчанию: localhost:8080)
 - `REPORT_INTERVAL` - интервал отправки метрик (по умолчанию: 10s)
 - `POLL_INTERVAL` - интервал сбора метрик (по умолчанию: 2s)
+- `GRPC_ADDRESS` - адрес gRPC сервера (например: localhost:9090)
+- `USE_GRPC` - использовать gRPC вместо HTTP (true/false)
 
 ### Переменные окружения сервера:
 - `ADDRESS` - адрес для прослушивания (по умолчанию: localhost:8080)
 - `DATABASE_DSN` - строка подключения к PostgreSQL
 - `FILE_STORAGE_PATH` - путь к файлу для хранения метрик
 - `RESTORE` - восстанавливать метрики из файла (по умолчанию: true)
+- `TRUSTED_SUBNET` - доверенная подсеть в формате CIDR (например: 192.168.0.0/16)
+- `CRYPTO_KEY` - путь к приватному ключу для дешифрования
+- `KEY` - ключ для подписи данных SHA256
+- `GRPC_ADDR` - адрес для gRPC сервера (например: localhost:9090)
+- `ENABLE_GRPC` - включить gRPC сервер (true/false)
 
 ## Логика выбора хранилища
 
@@ -516,7 +654,10 @@ go run cmd/keygen/main.go -private keys/private.pem -public keys/public.pem
     "store_interval": "300s",
     "store_file": "/tmp/metrics-db.json",
     "database_dsn": "postgres://user:pass@localhost/db",
-    "crypto_key": "/path/to/private.pem"
+    "crypto_key": "/path/to/private.pem",
+    "trusted_subnet": "192.168.0.0/16",
+    "grpc_addr": "localhost:9090",
+    "enable_grpc": true
 }
 ```
 
@@ -528,6 +669,9 @@ go run cmd/keygen/main.go -private keys/private.pem -public keys/public.pem
 - `store_file` - путь к файлу хранения (аналог флага `-f`)
 - `database_dsn` - строка подключения к БД (аналог флага `-d`)
 - `crypto_key` - путь к приватному ключу для дешифрования (аналог флага `-crypto-key`)
+- `trusted_subnet` - доверенная подсеть в формате CIDR (аналог флага `-t`)
+- `grpc_addr` - адрес и порт gRPC сервера (аналог флага `--grpc-addr`)
+- `enable_grpc` - включить gRPC сервер (аналог флага `--enable-grpc`)
 
 ### Формат конфигурации агента
 
@@ -536,7 +680,9 @@ go run cmd/keygen/main.go -private keys/private.pem -public keys/public.pem
     "address": "localhost:8080",
     "report_interval": "10s",
     "poll_interval": "2s",
-    "crypto_key": "/path/to/public.pem"
+    "crypto_key": "/path/to/public.pem",
+    "grpc_address": "localhost:9090",
+    "use_grpc": false
 }
 ```
 
@@ -546,6 +692,8 @@ go run cmd/keygen/main.go -private keys/private.pem -public keys/public.pem
 - `report_interval` - интервал отправки метрик (аналог флага `-r`)
 - `poll_interval` - интервал сбора метрик (аналог флага `-p`)
 - `crypto_key` - путь к публичному ключу для шифрования (аналог флага `-crypto-key`)
+- `grpc_address` - адрес gRPC сервера (аналог флага `--grpc-addr`)
+- `use_grpc` - использовать gRPC вместо HTTP (аналог флага `--use-grpc`)
 
 ### Форматы времени
 
@@ -583,6 +731,23 @@ CONFIG=configs/agent.json ./agent
 # JSON файл устанавливает address: "localhost:8080"
 # Флаг переопределяет значение
 ./server -c configs/server.json -a "0.0.0.0:9090"
+```
+
+#### Запуск с gRPC
+
+```bash
+# Запуск сервера с gRPC
+./server --enable-grpc --grpc-addr="localhost:9090"
+
+# Запуск агента с gRPC
+./agent --use-grpc --grpc-addr="localhost:9090"
+
+# Через переменные окружения
+ENABLE_GRPC=true GRPC_ADDR="localhost:9090" ./server
+USE_GRPC=true GRPC_ADDRESS="localhost:9090" ./agent
+
+# Комбинированный режим (HTTP + gRPC одновременно)
+./server -a "localhost:8080" --enable-grpc --grpc-addr="localhost:9090"
 ```
 
 ### Обратная совместимость
@@ -698,4 +863,4 @@ kill -INT <agent_pid>
 # или Ctrl+C
 ```
 
-**Важно**: Не используйте `kill -9` (SIGKILL), так как этот сигнал не может быть перехвачен и приведет к некорректному завершению работы без сохранения данных. 
+**Важно**: Не используйте `kill -9` (SIGKILL), так как этот сигнал не может быть перехвачен и приведет к некорректному завершению работы без сохранения данных.

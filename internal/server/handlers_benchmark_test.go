@@ -13,7 +13,7 @@ import (
 // setupTestRouter создает тестовый роутер с хранилищем в памяти
 func setupTestRouter() *Router {
 	storage := storage.NewMemStorage()
-	return NewRouter(storage, "", "")
+	return NewRouter(storage, "", "", "")
 }
 
 // BenchmarkRouter_UpdateGauge тестирует производительность обновления gauge метрики
@@ -101,7 +101,7 @@ func BenchmarkRouter_GetAllMetrics(b *testing.B) {
 
 // BenchmarkRouter_UpdateGaugeWithHash тестирует производительность обновления с хешированием
 func BenchmarkRouter_UpdateGaugeWithHash(b *testing.B) {
-	router := NewRouter(storage.NewMemStorage(), "test-key", "")
+	router := NewRouter(storage.NewMemStorage(), "test-key", "", "")
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -114,7 +114,7 @@ func BenchmarkRouter_UpdateGaugeWithHash(b *testing.B) {
 
 // BenchmarkRouter_UpdateCounterWithHash тестирует производительность обновления counter с хешированием
 func BenchmarkRouter_UpdateCounterWithHash(b *testing.B) {
-	router := NewRouter(storage.NewMemStorage(), "test-key", "")
+	router := NewRouter(storage.NewMemStorage(), "test-key", "", "")
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -127,7 +127,7 @@ func BenchmarkRouter_UpdateCounterWithHash(b *testing.B) {
 
 // BenchmarkRouter_UpdateBatchWithHash тестирует производительность batch обновлений с хешированием
 func BenchmarkRouter_UpdateBatchWithHash(b *testing.B) {
-	router := NewRouter(storage.NewMemStorage(), "test-key", "")
+	router := NewRouter(storage.NewMemStorage(), "test-key", "", "")
 
 	metrics := []models.Metrics{
 		{ID: "metric1", MType: "gauge", Value: func() *float64 { v := 123.45; return &v }()},
