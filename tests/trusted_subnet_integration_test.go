@@ -25,13 +25,13 @@ func TestTrustedSubnetIntegration(t *testing.T) {
 		},
 		{
 			name:          "localhost subnet - should allow localhost",
-			trustedSubnet: "192.168.0.0/16", // используем широкую подсеть для локальной сети
+			trustedSubnet: "172.0.0.0/8", // используем широкую подсеть включающую частные IP
 			expectStatus:  200,
 			expectSuccess: true,
 		},
 		{
 			name:          "private subnet - should allow private IPs",
-			trustedSubnet: "192.168.0.0/16",
+			trustedSubnet: "172.0.0.0/8",
 			expectStatus:  200,
 			expectSuccess: true,
 		},

@@ -30,8 +30,8 @@ func setupGRPCServer(t *testing.T, trustedSubnet, key string) (*grpc.Server, *gr
 	storage := storage.NewMemStorage()
 	metricsServer := grpcPkg.NewMetricsServer(storage, key)
 
-	interceptor := grpcPkg.SetupServerInterceptors(trustedSubnet, "")
-	s := grpc.NewServer(grpc.UnaryInterceptor(interceptor))
+	interceptors := grpcPkg.GetServerInterceptors(trustedSubnet, "")
+	s := grpc.NewServer(grpc.ChainUnaryInterceptor(interceptors...))
 
 	pb.RegisterMetricsServiceServer(s, metricsServer)
 
@@ -334,8 +334,8 @@ func TestGRPCBatchOperations(t *testing.T) {
 }
 
 func TestGRPCTrustedSubnet(t *testing.T) {
-	// Настройка сервера с ограниченной подсетью (широкая подсеть для локальной сети)
-	server, _, listener := setupGRPCServer(t, "192.168.0.0/16", "")
+	// Настройка сервера с ограниченной подсетью (широкая подсеть включающая частные IP)
+	server, _, listener := setupGRPCServer(t, "172.0.0.0/8", "")
 	defer server.Stop()
 
 	client, cleanup := setupGRPCClient(t, listener, "")

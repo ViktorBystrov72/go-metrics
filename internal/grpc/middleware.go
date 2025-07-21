@@ -50,40 +50,11 @@ func CryptoInterceptor(privateKeyPath string) grpc.UnaryServerInterceptor {
 	}
 }
 
-// ChainUnaryInterceptors объединяет несколько interceptors в один
-func ChainUnaryInterceptors(interceptors ...grpc.UnaryServerInterceptor) grpc.UnaryServerInterceptor {
-	if len(interceptors) == 0 {
-		return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-			return handler(ctx, req)
-		}
-	}
-
-	if len(interceptors) == 1 {
-		return interceptors[0]
-	}
-
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		// Создаем цепочку вызовов
-		chainHandler := handler
-		for i := len(interceptors) - 1; i >= 0; i-- {
-			interceptor := interceptors[i]
-			currentHandler := chainHandler
-			chainHandler = func(ctx context.Context, req interface{}) (interface{}, error) {
-				return interceptor(ctx, req, info, func(ctx context.Context, req interface{}) (interface{}, error) {
-					return currentHandler(ctx, req)
-				})
-			}
-		}
-
-		return chainHandler(ctx, req)
-	}
-}
-
-// SetupServerInterceptors настраивает все interceptors для gRPC сервера
-func SetupServerInterceptors(trustedSubnet, cryptoKeyPath string) grpc.UnaryServerInterceptor {
+// GetServerInterceptors возвращает список interceptors для gRPC сервера
+func GetServerInterceptors(trustedSubnet, cryptoKeyPath string) []grpc.UnaryServerInterceptor {
 	var interceptors []grpc.UnaryServerInterceptor
 
-	// Добавляем логирование (первым, чтобы логировать все запросы)
+	// Добавляем логирование первым, чтобы логировать все запросы
 	interceptors = append(interceptors, LoggingInterceptor())
 
 	// Добавляем проверку доверенных IP адресов
@@ -96,7 +67,7 @@ func SetupServerInterceptors(trustedSubnet, cryptoKeyPath string) grpc.UnaryServ
 		interceptors = append(interceptors, CryptoInterceptor(cryptoKeyPath))
 	}
 
-	return ChainUnaryInterceptors(interceptors...)
+	return interceptors
 }
 
 // RecoveryInterceptor обеспечивает graceful recovery от паник в gRPC handlers
