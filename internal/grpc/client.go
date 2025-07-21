@@ -6,6 +6,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/ViktorBystrov72/go-metrics/internal/converters"
 	"github.com/ViktorBystrov72/go-metrics/internal/models"
 	"github.com/ViktorBystrov72/go-metrics/internal/utils"
 	pb "github.com/ViktorBystrov72/go-metrics/proto"
@@ -41,14 +42,17 @@ func NewMetricsClient(serverAddress, key string) (*MetricsClient, error) {
 	}, nil
 }
 
-// Close закрывает соединение с сервером
+// Close закрывает соединение с gRPC сервером
 func (c *MetricsClient) Close() error {
 	return c.conn.Close()
 }
 
 // SendMetric отправляет одну метрику на сервер
 func (c *MetricsClient) SendMetric(ctx context.Context, metric models.Metrics) error {
-	pbMetric := c.modelToProto(metric)
+	// Конвертируем модель в protobuf формат используя общий конвертер
+	pbMetric := converters.ModelToProto(metric)
+
+	// Добавляем хеш если ключ задан
 	c.addHashToMetric(pbMetric)
 
 	req := &pb.UpdateMetricRequest{
@@ -67,17 +71,18 @@ func (c *MetricsClient) SendMetric(ctx context.Context, metric models.Metrics) e
 	return nil
 }
 
-// SendMetricsBatch отправляет множество метрик на сервер одним запросом
-func (c *MetricsClient) SendMetricsBatch(ctx context.Context, metrics []models.Metrics) error {
+// SendBatch отправляет множество метрик на сервер в одном запросе
+func (c *MetricsClient) SendBatch(ctx context.Context, metrics []models.Metrics) error {
 	if len(metrics) == 0 {
 		return nil
 	}
 
-	pbMetrics := make([]*pb.Metric, 0, len(metrics))
-	for _, metric := range metrics {
-		pbMetric := c.modelToProto(metric)
+	// Конвертируем все метрики используя общий конвертер
+	pbMetrics := converters.ModelsToProtos(metrics)
+
+	// Добавляем хеши ко всем метрикам
+	for _, pbMetric := range pbMetrics {
 		c.addHashToMetric(pbMetric)
-		pbMetrics = append(pbMetrics, pbMetric)
 	}
 
 	req := &pb.UpdateMetricsRequest{
@@ -97,10 +102,10 @@ func (c *MetricsClient) SendMetricsBatch(ctx context.Context, metrics []models.M
 }
 
 // GetMetric получает значение метрики с сервера
-func (c *MetricsClient) GetMetric(ctx context.Context, id, metricType string) (*models.Metrics, error) {
+func (c *MetricsClient) GetMetric(ctx context.Context, metricType, metricID string) (*models.Metrics, error) {
 	req := &pb.GetMetricRequest{
-		Id:   id,
 		Type: metricType,
+		Id:   metricID,
 	}
 
 	resp, err := c.client.GetMetric(ctx, req)
@@ -113,10 +118,12 @@ func (c *MetricsClient) GetMetric(ctx context.Context, id, metricType string) (*
 	}
 
 	if resp.Metric == nil {
-		return nil, fmt.Errorf("metric not found")
+		return nil, fmt.Errorf("no metric returned")
 	}
 
-	return c.protoToModel(resp.Metric), nil
+	// Конвертируем protobuf в модель используя общий конвертер
+	metric := converters.ProtoToModel(resp.Metric)
+	return &metric, nil
 }
 
 // GetAllMetrics получает все метрики с сервера
@@ -128,12 +135,8 @@ func (c *MetricsClient) GetAllMetrics(ctx context.Context) ([]models.Metrics, er
 		return nil, fmt.Errorf("failed to get all metrics: %v", err)
 	}
 
-	metrics := make([]models.Metrics, 0, len(resp.Metrics))
-	for _, pbMetric := range resp.Metrics {
-		metrics = append(metrics, *c.protoToModel(pbMetric))
-	}
-
-	return metrics, nil
+	// Конвертируем все protobuf метрики в модели используя общий конвертер
+	return converters.ProtosToModels(resp.Metrics), nil
 }
 
 // Ping проверяет доступность сервера
@@ -152,56 +155,13 @@ func (c *MetricsClient) Ping(ctx context.Context) error {
 	return nil
 }
 
-// modelToProto конвертирует внутреннюю модель в protobuf формат
-func (c *MetricsClient) modelToProto(metric models.Metrics) *pb.Metric {
-	pbMetric := &pb.Metric{
-		Id:   metric.ID,
-		Type: metric.MType,
-		Hash: metric.Hash,
-	}
-
-	switch metric.MType {
-	case "gauge":
-		if metric.Value != nil {
-			pbMetric.Value = metric.Value
-		}
-	case "counter":
-		if metric.Delta != nil {
-			pbMetric.Delta = metric.Delta
-		}
-	}
-
-	return pbMetric
-}
-
-// protoToModel конвертирует protobuf формат во внутреннюю модель
-func (c *MetricsClient) protoToModel(pbMetric *pb.Metric) *models.Metrics {
-	metric := &models.Metrics{
-		ID:    pbMetric.Id,
-		MType: pbMetric.Type,
-		Hash:  pbMetric.Hash,
-	}
-
-	switch pbMetric.Type {
-	case "gauge":
-		if pbMetric.Value != nil {
-			metric.Value = pbMetric.Value
-		}
-	case "counter":
-		if pbMetric.Delta != nil {
-			metric.Delta = pbMetric.Delta
-		}
-	}
-
-	return metric
-}
-
 // addHashToMetric добавляет хеш к метрике если ключ задан
 func (c *MetricsClient) addHashToMetric(metric *pb.Metric) {
 	if c.key == "" {
 		return
 	}
 
+	// Создаем строку для хеширования
 	var data string
 	switch metric.Type {
 	case "counter":
@@ -219,38 +179,33 @@ func (c *MetricsClient) addHashToMetric(metric *pb.Metric) {
 	}
 }
 
-// ClientIPInterceptor добавляет X-Real-IP к исходящим запросам
+// ClientIPInterceptor добавляет X-Real-IP в метаданные gRPC запроса
 func ClientIPInterceptor() grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-		// Получаем IP хоста
-		hostIP := getHostIP()
+		// Получаем локальный IP адрес
+		localIP := getLocalIP()
+		if localIP != "" {
+			// Добавляем IP в метаданные
+			md := metadata.Pairs("x-real-ip", localIP)
+			ctx = metadata.NewOutgoingContext(ctx, md)
+		}
 
-		// Добавляем IP в метаданные
-		md := metadata.New(map[string]string{
-			"x-real-ip": hostIP,
-		})
-		ctx = metadata.NewOutgoingContext(ctx, md)
-
-		// Вызываем оригинальный метод с обогащенным контекстом
 		return invoker(ctx, method, req, reply, cc, opts...)
 	}
 }
 
-// getHostIP получает IP-адрес хоста для заголовка X-Real-IP
-func getHostIP() string {
-	// Пытаемся подключиться к внешнему адресу для определения локального IP
-	conn, err := net.Dial("udp", "8.8.8.8:80")
+// getLocalIP получает локальный IP адрес машины
+func getLocalIP() string {
+	// Пытаемся установить UDP соединение чтобы определить локальный IP
+	conn, err := net.DialTimeout("udp", "8.8.8.8:80", time.Second)
 	if err != nil {
-		// Если не удалось, используем localhost
-		return "127.0.0.1"
+		return ""
 	}
 	defer conn.Close()
 
-	localAddr := conn.LocalAddr().(*net.UDPAddr)
-	return localAddr.IP.String()
-}
+	if localAddr, ok := conn.LocalAddr().(*net.UDPAddr); ok {
+		return localAddr.IP.String()
+	}
 
-// ClientWithTimeout создает контекст с таймаутом для gRPC запросов
-func ClientWithTimeout(timeout time.Duration) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), timeout)
+	return ""
 }

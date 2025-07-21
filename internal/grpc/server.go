@@ -3,9 +3,8 @@ package grpc
 import (
 	"context"
 	"fmt"
-	"log"
 
-	"github.com/ViktorBystrov72/go-metrics/internal/models"
+	"github.com/ViktorBystrov72/go-metrics/internal/converters"
 	"github.com/ViktorBystrov72/go-metrics/internal/storage"
 	"github.com/ViktorBystrov72/go-metrics/internal/utils"
 	pb "github.com/ViktorBystrov72/go-metrics/proto"
@@ -53,13 +52,9 @@ func (s *MetricsServer) UpdateMetric(ctx context.Context, req *pb.UpdateMetricRe
 		}
 		s.storage.UpdateGauge(req.Metric.Id, *req.Metric.Value)
 
-		// Возвращаем обновленную метрику
+		// Возвращаем обновленную метрику используя конвертер
 		response := &pb.UpdateMetricResponse{
-			Metric: &pb.Metric{
-				Id:    req.Metric.Id,
-				Type:  req.Metric.Type,
-				Value: req.Metric.Value,
-			},
+			Metric: converters.CreateGaugeProto(req.Metric.Id, *req.Metric.Value),
 		}
 		s.addHashToMetric(response.Metric)
 		return response, nil
@@ -81,11 +76,7 @@ func (s *MetricsServer) UpdateMetric(ctx context.Context, req *pb.UpdateMetricRe
 		}
 
 		response := &pb.UpdateMetricResponse{
-			Metric: &pb.Metric{
-				Id:    req.Metric.Id,
-				Type:  req.Metric.Type,
-				Delta: &value,
-			},
+			Metric: converters.CreateCounterProto(req.Metric.Id, value),
 		}
 		s.addHashToMetric(response.Metric)
 		return response, nil
@@ -108,11 +99,7 @@ func (s *MetricsServer) GetMetric(ctx context.Context, req *pb.GetMetricRequest)
 			}, nil
 		}
 
-		metric := &pb.Metric{
-			Id:    req.Id,
-			Type:  req.Type,
-			Value: &value,
-		}
+		metric := converters.CreateGaugeProto(req.Id, value)
 		s.addHashToMetric(metric)
 
 		return &pb.GetMetricResponse{
@@ -127,11 +114,7 @@ func (s *MetricsServer) GetMetric(ctx context.Context, req *pb.GetMetricRequest)
 			}, nil
 		}
 
-		metric := &pb.Metric{
-			Id:    req.Id,
-			Type:  req.Type,
-			Delta: &value,
-		}
+		metric := converters.CreateCounterProto(req.Id, value)
 		s.addHashToMetric(metric)
 
 		return &pb.GetMetricResponse{
@@ -164,41 +147,20 @@ func (s *MetricsServer) UpdateMetrics(ctx context.Context, req *pb.UpdateMetrics
 		}
 	}
 
-	// Конвертируем protobuf метрики в внутренний формат
-	metricsModels := make([]models.Metrics, 0, len(req.Metrics))
+	// Валидируем и конвертируем protobuf метрики в внутренний формат используя общий конвертер
 	for _, pbMetric := range req.Metrics {
-		model := models.Metrics{
-			ID:    pbMetric.Id,
-			MType: pbMetric.Type,
-		}
-
-		switch pbMetric.Type {
-		case "gauge":
-			if pbMetric.Value == nil {
-				return &pb.UpdateMetricsResponse{
-					Error: fmt.Sprintf("value is required for gauge metric: %s", pbMetric.Id),
-				}, nil
-			}
-			model.Value = pbMetric.Value
-		case "counter":
-			if pbMetric.Delta == nil {
-				return &pb.UpdateMetricsResponse{
-					Error: fmt.Sprintf("delta is required for counter metric: %s", pbMetric.Id),
-				}, nil
-			}
-			model.Delta = pbMetric.Delta
-		default:
+		if err := converters.ValidateProtoMetric(pbMetric); err != nil {
 			return &pb.UpdateMetricsResponse{
-				Error: fmt.Sprintf("unknown metric type: %s for metric %s", pbMetric.Type, pbMetric.Id),
+				Error: fmt.Sprintf("validation failed for metric %s: %v", pbMetric.Id, err),
 			}, nil
 		}
-
-		metricsModels = append(metricsModels, model)
 	}
+
+	// Конвертируем protobuf метрики в модели
+	metricsModels := converters.ProtosToModels(req.Metrics)
 
 	// Обновляем все метрики в batch
 	if err := s.storage.UpdateBatch(metricsModels); err != nil {
-		log.Printf("Failed to update batch: %v", err)
 		return &pb.UpdateMetricsResponse{
 			Error: fmt.Sprintf("failed to update metrics: %v", err),
 		}, nil
@@ -207,52 +169,41 @@ func (s *MetricsServer) UpdateMetrics(ctx context.Context, req *pb.UpdateMetrics
 	return &pb.UpdateMetricsResponse{}, nil
 }
 
-// GetAllMetrics получает все метрики в системе
+// GetAllMetrics получает все метрики
 func (s *MetricsServer) GetAllMetrics(ctx context.Context, req *pb.GetAllMetricsRequest) (*pb.GetAllMetricsResponse, error) {
-	var pbMetrics []*pb.Metric
-
 	// Получаем все gauge метрики
 	gauges := s.storage.GetAllGauges()
+	gaugeProtos := make([]*pb.Metric, 0, len(gauges))
 	for name, value := range gauges {
-		metric := &pb.Metric{
-			Id:    name,
-			Type:  "gauge",
-			Value: &value,
-		}
+		metric := converters.CreateGaugeProto(name, value)
 		s.addHashToMetric(metric)
-		pbMetrics = append(pbMetrics, metric)
+		gaugeProtos = append(gaugeProtos, metric)
 	}
 
 	// Получаем все counter метрики
 	counters := s.storage.GetAllCounters()
+	counterProtos := make([]*pb.Metric, 0, len(counters))
 	for name, value := range counters {
-		metric := &pb.Metric{
-			Id:    name,
-			Type:  "counter",
-			Delta: &value,
-		}
+		metric := converters.CreateCounterProto(name, value)
 		s.addHashToMetric(metric)
-		pbMetrics = append(pbMetrics, metric)
+		counterProtos = append(counterProtos, metric)
 	}
 
+	// Объединяем все метрики
+	allMetrics := append(gaugeProtos, counterProtos...)
+
 	return &pb.GetAllMetricsResponse{
-		Metrics: pbMetrics,
+		Metrics: allMetrics,
 	}, nil
 }
 
-// Ping проверяет здоровье сервиса и доступность хранилища
+// Ping проверяет здоровье сервиса
 func (s *MetricsServer) Ping(ctx context.Context, req *pb.PingRequest) (*pb.PingResponse, error) {
-	if !s.storage.IsAvailable() {
-		return &pb.PingResponse{
-			Ok:    false,
-			Error: "storage is not available",
-		}, nil
-	}
-
+	// Проверяем доступность хранилища
 	if err := s.storage.Ping(); err != nil {
 		return &pb.PingResponse{
 			Ok:    false,
-			Error: fmt.Sprintf("storage ping failed: %v", err),
+			Error: fmt.Sprintf("storage unavailable: %v", err),
 		}, nil
 	}
 
@@ -261,12 +212,40 @@ func (s *MetricsServer) Ping(ctx context.Context, req *pb.PingRequest) (*pb.Ping
 	}, nil
 }
 
-// addHashToMetric добавляет хеш к метрике если ключ задан
+// verifyMetricHash проверяет хеш метрики
+func (s *MetricsServer) verifyMetricHash(metric *pb.Metric) bool {
+	if s.key == "" {
+		return true
+	}
+
+	// Создаем строку для хеширования
+	var data string
+	switch metric.Type {
+	case "counter":
+		if metric.Delta != nil {
+			data = fmt.Sprintf("%s:%s:%d", metric.Id, metric.Type, *metric.Delta)
+		}
+	case "gauge":
+		if metric.Value != nil {
+			data = fmt.Sprintf("%s:%s:%f", metric.Id, metric.Type, *metric.Value)
+		}
+	}
+
+	if data == "" {
+		return false
+	}
+
+	expectedHash := utils.CalculateHash([]byte(data), s.key)
+	return expectedHash == metric.Hash
+}
+
+// addHashToMetric добавляет хеш к метрике
 func (s *MetricsServer) addHashToMetric(metric *pb.Metric) {
 	if s.key == "" {
 		return
 	}
 
+	// Создаем строку для хеширования
 	var data string
 	switch metric.Type {
 	case "counter":
@@ -282,43 +261,4 @@ func (s *MetricsServer) addHashToMetric(metric *pb.Metric) {
 	if data != "" {
 		metric.Hash = utils.CalculateHash([]byte(data), s.key)
 	}
-}
-
-// verifyMetricHash проверяет хеш метрики
-func (s *MetricsServer) verifyMetricHash(metric *pb.Metric) bool {
-	if s.key == "" {
-		return true
-	}
-
-	if metric.Hash == "" {
-		log.Printf("No hash provided for metric: %s, type: %s", metric.Id, metric.Type)
-		return false
-	}
-
-	var data string
-	switch metric.Type {
-	case "counter":
-		if metric.Delta == nil {
-			log.Printf("Counter metric %s has nil delta", metric.Id)
-			return false
-		}
-		data = fmt.Sprintf("%s:%s:%d", metric.Id, metric.Type, *metric.Delta)
-	case "gauge":
-		if metric.Value == nil {
-			log.Printf("Gauge metric %s has nil value", metric.Id)
-			return false
-		}
-		data = fmt.Sprintf("%s:%s:%f", metric.Id, metric.Type, *metric.Value)
-	default:
-		log.Printf("Unknown metric type: %s for metric %s", metric.Type, metric.Id)
-		return false
-	}
-
-	expectedHash := utils.CalculateHash([]byte(data), s.key)
-	if metric.Hash != expectedHash {
-		log.Printf("Hash mismatch for metric %s: expected %s, got %s", metric.Id, expectedHash, metric.Hash)
-		return false
-	}
-
-	return true
 }
